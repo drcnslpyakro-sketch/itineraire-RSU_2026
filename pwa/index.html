@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Itinéraires RSU — Yamoussoukro</title>
+<meta name="theme-color" content="#9a3f1f">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="./style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- Écran de connexion — bloque l'accès tant que l'opérateur n'est pas authentifié -->
+  <div class="modal-backdrop" id="login-overlay" style="align-items:center;">
+    <div class="modal" style="max-width:380px; text-align:center; border-radius:14px;">
+      <h2>Connexion opérateur</h2>
+      <p>Connectez-vous avec le compte Google fourni par le coordinateur du projet pour accéder à l'application (mode multi-opérateurs).</p>
+      <div id="google-signin-button" style="display:flex; justify-content:center; margin:16px 0 6px;"></div>
+      <p class="empty-hint" id="login-error" style="color:var(--danger);"></p>
+    </div>
+  </div>
+
+  <header>
+    <div class="title-row">
+      <h1>Itinéraires RSU</h1>
+      <span id="net-status"><span class="dot"></span><span id="net-status-text">…</span></span>
+    </div>
+    <div id="route-status">Chargement du référentiel des localités…</div>
+  </header>
+
+  <div id="toolbar">
+    <div class="row">
+      <input type="text" id="search-input" placeholder="Rechercher une localité, un village, un quartier…" autocomplete="off" />
+      <div id="search-results"></div>
+    </div>
+    <div class="row">
+      <button class="secondary" id="btn-toggle-unverified" title="Afficher/masquer les localités sans position connue">Sans position : afficher</button>
+      <button class="secondary" id="btn-recalc-route">Recalculer l'itinéraire</button>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <button id="fab-toggle" aria-label="Ouvrir le panneau">
+    ☰
+    <span id="sync-badge" class="hidden">0</span>
+  </button>
+
+  <div id="bottom-panel" class="collapsed">
+    <div class="panel-tabs">
+      <div class="panel-tab active" data-tab="itineraire">Itinéraire</div>
+      <div class="panel-tab" data-tab="sync">Synchronisation</div>
+      <div class="panel-tab" data-tab="operateur">Opérateur</div>
+    </div>
+    <div class="panel-body">
+
+      <div class="panel-view active" data-view="itineraire">
+        <p class="empty-hint" id="itineraire-hint">Touchez un marqueur puis « Ajouter à l'itinéraire » pour construire votre trajet. Par défaut, les localités à position vérifiée sont triées par distance au centre.</p>
+        <div id="itineraire-list"></div>
+      </div>
+
+      <div class="panel-view" data-view="sync">
+        <p class="empty-hint" id="sync-hint">Aucune mise à jour en attente.</p>
+        <div id="sync-list"></div>
+        <div class="row" style="margin-top:10px;">
+          <button class="primary" id="btn-sync-now">Synchroniser maintenant</button>
+        </div>
+      </div>
+
+      <div class="panel-view" data-view="operateur">
+        <div id="account-card" style="display:flex; align-items:center; gap:12px; padding:10px; background:var(--paper); border-radius:10px;">
+          <img id="account-picture" src="" alt="" style="width:40px; height:40px; border-radius:50%; display:none;">
+          <div>
+            <div class="name" id="account-name">Non connecté</div>
+            <div class="sub" id="account-email"></div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px;">
+          <button class="ghost" id="btn-sign-out">Se déconnecter</button>
+        </div>
+        <p class="empty-hint" style="margin-top:12px;">
+          Votre compte Google identifie chaque correction envoyée (position ou suivi de ménage) dans les
+          journaux « PWA_Journal » et « PWA_Journal_Menages ». Seuls les comptes ajoutés par le
+          coordinateur du projet (feuille PWA_Operateurs) peuvent utiliser l'application.
+        </p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Boîte de dialogue : confirmation de la nouvelle position GPS -->
+  <div class="modal-backdrop hidden" id="gps-modal">
+    <div class="modal">
+      <h2 id="gps-modal-title">Actualiser la position</h2>
+      <p id="gps-modal-sub">Vérifiez la nouvelle position captée avant de l'envoyer.</p>
+      <div class="coord-compare">
+        <div class="coord-box">
+          <div class="label">Position actuelle</div>
+          <div class="value" id="gps-old-coords">—</div>
+        </div>
+        <div class="coord-box">
+          <div class="label">Nouvelle position (GPS)</div>
+          <div class="value" id="gps-new-coords">…</div>
+        </div>
+      </div>
+      <p class="empty-hint" id="gps-accuracy">Précision : —</p>
+      <div class="modal-actions">
+        <button class="secondary" id="gps-cancel">Annuler</button>
+        <button class="primary" id="gps-confirm" disabled>Envoyer la correction</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Boîte de dialogue : liste des ménages d'une localité -->
+  <div class="modal-backdrop hidden" id="menages-modal">
+    <div class="modal" style="max-height:80vh; display:flex; flex-direction:column;">
+      <h2 id="menages-modal-title">Ménages</h2>
+      <p class="empty-hint" style="margin-bottom:10px;">Touchez un ménage pour actualiser son statut de traitement.</p>
+      <input type="text" id="menages-search" placeholder="Rechercher par nom ou téléphone…" style="margin-bottom:8px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper);" />
+      <div id="menages-list" style="overflow-y:auto; flex:1;"></div>
+      <div class="modal-actions" style="margin-top:12px;">
+        <button class="secondary" id="menages-close">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Boîte de dialogue : fiche de suivi d'un ménage -->
+  <div class="modal-backdrop hidden" id="menage-detail-modal">
+    <div class="modal" style="max-height:85vh; overflow-y:auto;">
+      <h2 id="menage-detail-title">Ménage</h2>
+      <p class="empty-hint" id="menage-detail-tel" style="margin-bottom:12px;">—</p>
+
+      <div class="field-label">Statut de traitement</div>
+      <select id="menage-statut" style="width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); font-size:0.9rem;">
+        <option>Non traité</option>
+        <option>Rendez-vous pris</option>
+        <option>Enquête réalisée</option>
+        <option>Ménage introuvable</option>
+        <option>Refus du ménage</option>
+        <option>Affecté à une autre équipe</option>
+      </select>
+
+      <div class="row" style="margin-top:10px;">
+        <div style="flex:1;">
+          <div class="field-label">Date du RDV</div>
+          <input type="date" id="menage-date-rdv" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--paper);">
+        </div>
+        <div style="flex:1;">
+          <div class="field-label">Heure</div>
+          <input type="time" id="menage-heure-rdv" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--paper);">
+        </div>
+      </div>
+
+      <div class="field-label">Équipe en charge</div>
+      <input type="text" id="menage-equipe" style="width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper);" placeholder="Ex. Équipe 2 — Attiégouakro">
+
+      <div class="field-label">Observations</div>
+      <textarea id="menage-observations" rows="3" style="width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); font-family:inherit; font-size:0.88rem;"></textarea>
+
+      <div class="field-label">Photo de la visite (optionnelle)</div>
+      <input type="file" id="menage-photo-input" accept="image/*" capture="environment">
+      <div id="menage-photo-preview" style="margin-top:8px;"></div>
+
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="secondary" id="menage-cancel">Annuler</button>
+        <button class="primary" id="menage-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="./config.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
