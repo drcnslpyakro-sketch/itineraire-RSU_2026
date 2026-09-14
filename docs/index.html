@@ -28,7 +28,13 @@
   <header>
     <div class="title-row">
       <h1>Itinéraires RSU</h1>
-      <span id="net-status"><span class="dot"></span><span id="net-status-text">…</span></span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span id="net-status"><span class="dot"></span><span id="net-status-text">…</span></span>
+        <button id="fab-toggle" aria-label="Ouvrir le panneau">
+          ☰
+          <span id="sync-badge" class="hidden">0</span>
+        </button>
+      </div>
     </div>
     <div id="route-status">Chargement du référentiel des localités…</div>
   </header>
@@ -45,11 +51,6 @@
   </div>
 
   <div id="map"></div>
-
-  <button id="fab-toggle" aria-label="Ouvrir le panneau">
-    ☰
-    <span id="sync-badge" class="hidden">0</span>
-  </button>
 
   <div id="bottom-panel" class="collapsed">
     <div class="panel-tabs">
