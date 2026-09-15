@@ -168,11 +168,23 @@ const els = {};
 /* ============================================================
    3. Chargement du référentiel : Apps Script (vivant) -> GitHub (repli) -> cache
    ============================================================ */
+// Si Apps Script plante hors des try/catch du script (ou si le déploiement n'est plus
+// autorisé), il renvoie une page HTML au lieu de JSON — res.json() échoue alors avec un
+// message technique illisible ("Unexpected token '<'"). On donne ici un message clair.
+async function parseJsonResponse(res) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error("Réponse invalide du serveur — le script Apps Script a probablement besoin d'être réautorisé ou redéployé (voir GUIDE_DEPLOIEMENT.md).");
+  }
+}
+
 async function fetchLive() {
   const url = `${CFG.APPS_SCRIPT_URL}?action=list&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
   const res = await fetch(url, { method: "GET" });
   if (!res.ok) throw new Error("Apps Script HTTP " + res.status);
-  const data = await res.json();
+  const data = await parseJsonResponse(res);
   if (data.auth_required) throw Object.assign(new Error(data.error || "Reconnexion nécessaire"), { authRequired: true });
   if (data.error) throw new Error(data.error);
   if (!data || !Array.isArray(data.localites)) throw new Error("Réponse Apps Script invalide");
@@ -420,7 +432,7 @@ els["gps-confirm"].addEventListener("click", async () => {
 async function fetchMenages(cle) {
   const url = `${CFG.APPS_SCRIPT_URL}?action=menages&cle=${encodeURIComponent(cle)}&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
   const res = await fetch(url);
-  const data = await res.json();
+  const data = await parseJsonResponse(res);
   if (data.auth_required) throw Object.assign(new Error(data.error), { authRequired: true });
   if (data.error) throw new Error(data.error);
   return data.menages || [];
@@ -465,12 +477,17 @@ function statutBadgeClass(statut) {
 }
 function renderMenagesList(menages) {
   const q = els["menages-search"].value.trim().toLowerCase();
-  const filtered = q ? menages.filter(m => (m.nom_chef_menage||"").toLowerCase().includes(q) || String(m.tel_chef_menage||"").includes(q)) : menages;
+  const filtered = q ? menages.filter(m =>
+    (m.nom_chef_menage||"").toLowerCase().includes(q) ||
+    String(m.tel_chef_menage||"").includes(q) ||
+    String(m.id_menage||"").toLowerCase().includes(q)
+  ) : menages;
   if (filtered.length === 0) { els["menages-list"].innerHTML = '<div class="empty-hint">Aucun ménage trouvé.</div>'; return; }
   els["menages-list"].innerHTML = filtered.map(m => `
     <div class="list-row" data-id="${m.id_menage}" style="cursor:pointer;">
       <div><div class="name">${m.nom_chef_menage || "(nom non renseigné)"}</div>
-      <div class="sub">${m.tel_chef_menage || "sans téléphone"} · ${m.village_quartier || ""}${m._enAttente ? " · en attente d'envoi" : ""}</div></div>
+      <div class="sub">${m.tel_chef_menage || "sans téléphone"} · ${m.village_quartier || ""}${m._enAttente ? " · en attente d'envoi" : ""}</div>
+      <div class="sub" style="opacity:0.7;">${m.id_menage || ""}</div></div>
       <span class="badge ${statutBadgeClass(m.statut)}">${m.statut || "Non traité"}</span>
     </div>`).join("");
   els["menages-list"].querySelectorAll("[data-id]").forEach(row => row.addEventListener("click", () => openMenageDetail(row.dataset.id)));
@@ -560,7 +577,7 @@ async function trySyncAll() {
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (data.ok) {
         await idbDeletePending(item.id);
       } else if (data.auth_required) {
@@ -641,7 +658,7 @@ async function fetchExportColumns() {
   if (exportColumnsCache) return exportColumnsCache;
   const url = `${CFG.APPS_SCRIPT_URL}?action=export_columns&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
   const res = await fetch(url);
-  const data = await res.json();
+  const data = await parseJsonResponse(res);
   if (data.auth_required) throw Object.assign(new Error(data.error), { authRequired: true });
   exportColumnsCache = data.columns || [];
   return exportColumnsCache;
@@ -682,7 +699,7 @@ els["export-columns-confirm"].addEventListener("click", async () => {
     const colParam = encodeURIComponent(selected.join(","));
     const url = `${CFG.APPS_SCRIPT_URL}?action=export_menages&colonnes=${colParam}&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
     const res = await fetch(url);
-    const data = await res.json();
+    const data = await parseJsonResponse(res);
     if (data.auth_required) throw Object.assign(new Error(data.error), { authRequired: true });
     if (!data.ok) throw new Error(data.error || "Échec de l'export");
     window.open(data.url, "_blank");
