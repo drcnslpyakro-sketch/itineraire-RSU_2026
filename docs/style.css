@@ -52,7 +52,8 @@ header h1{
   display:flex; flex-direction:column; gap:8px;
   flex-shrink:0; position:relative; z-index:15;
 }
-.row{display:flex; gap:8px; align-items:center;}
+.row{display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+#toolbar > .row:not(:first-child) > button{flex:1 1 180px; min-width:0;}
 input[type="text"], input[type="password"], input[type="date"], input[type="time"],
 select, textarea{
   flex:1; padding:11px 13px; font-size:0.92rem;
@@ -185,4 +186,11 @@ button:disabled{opacity:0.45; cursor:default;}
 @media (min-width: 760px){
   #bottom-panel{max-width:420px; position:fixed; right:16px; bottom:16px; top:auto;
     left:auto; border-radius:12px; border:1px solid var(--line); box-shadow:var(--shadow);}
+}
+
+@media (max-width: 520px){
+  #toolbar > .row:not(:first-child) > button{flex-basis:100%;}
+  .coord-compare{flex-direction:column;}
+  .modal-actions{flex-wrap:wrap;}
+  .modal-actions button{min-width:140px;}
 }

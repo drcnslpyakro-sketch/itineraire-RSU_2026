@@ -160,12 +160,19 @@ const els = {};
   "sync-list","sync-hint","btn-sync-now","btn-recalc-route","btn-toggle-unverified","btn-open-gmaps",
   "btn-export-menages","export-columns-modal","export-columns-list","export-columns-all",
   "export-columns-none","export-columns-cancel","export-columns-confirm",
+  "btn-add-localite","btn-hidden-localites","add-localite-modal","add-localite-nom",
+  "add-localite-type","add-localite-departement","add-localite-sous-prefecture",
+  "add-localite-departement-options","add-localite-sous-prefecture-options",
+  "add-localite-gps-coords","add-localite-gps-accuracy","add-localite-capture-gps",
+  "add-localite-cancel","add-localite-save","hidden-localites-modal","hidden-localites-list",
+  "hidden-localites-close",
   "btn-sign-out","gps-modal","gps-modal-title","gps-modal-sub","gps-old-coords",
   "gps-new-coords","gps-accuracy","gps-cancel","gps-confirm",
   "menages-modal","menages-modal-title","menages-search","menages-statut-filter","menages-export","menages-list","menages-close",
   "menage-detail-modal","menage-detail-title","menage-detail-tel","menage-statut",
   "menage-date-rdv","menage-heure-rdv","menage-equipe","menage-observations",
   "menage-photo-input","menage-photo-preview","menage-cancel","menage-save"
+  ,"menage-cancel-rdv"
 ].forEach(id => els[id] = document.getElementById(id));
 
 /* ============================================================
@@ -224,6 +231,12 @@ function applyPendingOverrides(list, pending) {
       byCle[p.cle].statut_coordonnees = "Vérifiée (terrain — en attente d'envoi)";
     }
   });
+  pending.filter(p => p.kind === "localite_add" && p.localite).forEach(p => {
+    if (!byCle[p.localite.cle]) byCle[p.localite.cle] = { ...p.localite };
+  });
+  pending.filter(p => p.kind === "localite_visibility").forEach(p => {
+    if (byCle[p.cle]) byCle[p.cle].masquee = p.masquee;
+  });
   return Object.values(byCle);
 }
 function flagAuthProblem(message) { els["route-status"].textContent = "Reconnexion nécessaire : " + message; }
@@ -248,6 +261,7 @@ function renderMarkers() {
   Object.values(state.markersByCle).forEach(m => state.map.removeLayer(m));
   state.markersByCle = {};
   state.localites.forEach(loc => {
+    if (loc.masquee) return;
     if (loc.lat == null || loc.lng == null) return;
     const verifiee = (loc.statut_coordonnees || "").toLowerCase().includes("vérifiée");
     if (!verifiee && !state.showUnverified) return;
@@ -270,12 +284,14 @@ function buildPopupHtml(loc) {
       <button class="secondary" data-action="add-itin" data-cle="${loc.cle}">Ajouter à l'itinéraire</button>
       <button class="secondary" data-action="menages" data-cle="${loc.cle}">Voir les ménages</button>
       <button class="primary" data-action="update-gps" data-cle="${loc.cle}">Actualiser la position</button>
+      <button class="ghost" data-action="hide-localite" data-cle="${loc.cle}">Masquer</button>
     </div>`;
 }
 function bindPopupActions(loc) {
   document.querySelectorAll('[data-action="add-itin"]').forEach(btn => btn.onclick = () => addToItinerary(btn.dataset.cle));
   document.querySelectorAll('[data-action="update-gps"]').forEach(btn => btn.onclick = () => openGpsModal(btn.dataset.cle));
   document.querySelectorAll('[data-action="menages"]').forEach(btn => btn.onclick = () => openMenagesModal(btn.dataset.cle));
+  document.querySelectorAll('[data-action="hide-localite"]').forEach(btn => btn.onclick = () => hideLocalite(btn.dataset.cle));
 }
 
 /* ============================================================
@@ -314,7 +330,7 @@ function selectFromSearch(cle) {
 els["search-input"].addEventListener("input", () => {
   const q = els["search-input"].value.trim().toLowerCase();
   if (q === "") { els["search-results"].classList.remove("open"); return; }
-  renderSearchResults(state.localites.filter(l => (l.nom||"").toLowerCase().includes(q) || (l.sous_prefecture||"").toLowerCase().includes(q)));
+  renderSearchResults(state.localites.filter(l => !l.masquee && ((l.nom||"").toLowerCase().includes(q) || (l.sous_prefecture||"").toLowerCase().includes(q))));
 });
 els["search-input"].addEventListener("focus", () => { if (els["search-input"].value.trim() !== "") els["search-results"].classList.add("open"); });
 document.addEventListener("click", (e) => { if (!document.getElementById("toolbar").contains(e.target)) els["search-results"].classList.remove("open"); });
@@ -430,7 +446,77 @@ els["gps-confirm"].addEventListener("click", async () => {
 });
 
 /* ============================================================
-   8. Suivi terrain des ménages
+   8. Gestion partagée des localités
+   ============================================================ */
+function localiteKey(departement, sousPrefecture, nom) {
+  return [departement, sousPrefecture, nom].map(value => String(value || "").trim().toUpperCase()).join("|");
+}
+function refreshLocaliteOptions() {
+  const departments = [...new Set(state.localites.map(l => l.departement).filter(Boolean))].sort();
+  const sousPrefectures = [...new Set(state.localites.map(l => l.sous_prefecture).filter(Boolean))].sort();
+  els["add-localite-departement-options"].innerHTML = departments.map(value => `<option value="${value}"></option>`).join("");
+  els["add-localite-sous-prefecture-options"].innerHTML = sousPrefectures.map(value => `<option value="${value}"></option>`).join("");
+}
+function openAddLocaliteModal() {
+  refreshLocaliteOptions();
+  ["add-localite-nom", "add-localite-departement", "add-localite-sous-prefecture"].forEach(id => { els[id].value = ""; });
+  els["add-localite-type"].value = "Village";
+  els["add-localite-gps-coords"].textContent = "Aucune";
+  els["add-localite-gps-accuracy"].textContent = "—";
+  addLocaliteGps = null;
+  els["add-localite-modal"].classList.remove("hidden");
+}
+let addLocaliteGps = null;
+els["btn-add-localite"].addEventListener("click", openAddLocaliteModal);
+els["add-localite-cancel"].addEventListener("click", () => els["add-localite-modal"].classList.add("hidden"));
+els["add-localite-capture-gps"].addEventListener("click", () => {
+  if (!("geolocation" in navigator)) { els["add-localite-gps-coords"].textContent = "Géolocalisation indisponible"; return; }
+  els["add-localite-gps-coords"].textContent = "Capture en cours…";
+  navigator.geolocation.getCurrentPosition(pos => {
+    addLocaliteGps = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
+    els["add-localite-gps-coords"].textContent = `${addLocaliteGps.lat.toFixed(5)}, ${addLocaliteGps.lng.toFixed(5)}`;
+    els["add-localite-gps-accuracy"].textContent = `± ${Math.round(addLocaliteGps.accuracy)} m`;
+  }, err => { els["add-localite-gps-coords"].textContent = err.message || "Échec de la capture GPS"; }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+});
+els["add-localite-save"].addEventListener("click", async () => {
+  const nom = els["add-localite-nom"].value.trim();
+  const departement = els["add-localite-departement"].value.trim();
+  const sousPrefecture = els["add-localite-sous-prefecture"].value.trim();
+  if (!nom || !departement || !sousPrefecture) { alert("Le nom, le département et la sous-préfecture sont requis."); return; }
+  const cle = localiteKey(departement, sousPrefecture, nom);
+  if (state.localites.some(l => l.cle === cle)) { alert("Cette localité existe déjà dans le référentiel."); return; }
+  const localite = {
+    cle, nom, type: els["add-localite-type"].value, departement: departement.toUpperCase(),
+    sous_prefecture: sousPrefecture.toUpperCase(), nb_menages: 0,
+    lat: addLocaliteGps ? addLocaliteGps.lat : null, lng: addLocaliteGps ? addLocaliteGps.lng : null,
+    statut_coordonnees: addLocaliteGps ? "Vérifiée (terrain)" : "Position non vérifiée",
+    source: "Ajout manuel (PWA)", masquee: false
+  };
+  await idbAddPending({ kind: "localite_add", localite, timestamp: new Date().toISOString(), accuracy: addLocaliteGps && addLocaliteGps.accuracy });
+  els["add-localite-modal"].classList.add("hidden");
+  await refreshPendingAndData(false);
+  trySyncAll();
+});
+async function hideLocalite(cle, masquee = true) {
+  const loc = state.localites.find(item => item.cle === cle);
+  if (!loc) return;
+  if (masquee && !confirm(`Masquer « ${loc.nom} » pour tous les opérateurs ?`)) return;
+  await idbAddPending({ kind: "localite_visibility", cle, nom: loc.nom, masquee, timestamp: new Date().toISOString() });
+  await refreshPendingAndData(false);
+  trySyncAll();
+}
+function renderHiddenLocalites() {
+  const hidden = state.localites.filter(loc => loc.masquee);
+  els["hidden-localites-list"].innerHTML = hidden.length
+    ? hidden.map(loc => `<div class="list-row"><div><div class="name">${loc.nom}</div><div class="sub">${loc.sous_prefecture || ""} · ${loc.departement || ""}</div></div><button class="secondary" data-unhide="${loc.cle}">Réafficher</button></div>`).join("")
+    : '<div class="empty-hint">Aucune localité masquée.</div>';
+  els["hidden-localites-list"].querySelectorAll("[data-unhide]").forEach(btn => btn.onclick = () => hideLocalite(btn.dataset.unhide, false));
+}
+els["btn-hidden-localites"].addEventListener("click", () => { renderHiddenLocalites(); els["hidden-localites-modal"].classList.remove("hidden"); });
+els["hidden-localites-close"].addEventListener("click", () => els["hidden-localites-modal"].classList.add("hidden"));
+
+/* ============================================================
+   9. Suivi terrain des ménages
    ============================================================ */
 /* ============================================================
    Cache des listes de ménages par localité, tamponné 24h
@@ -601,6 +687,11 @@ function openMenageDetail(idMenage) {
   els["menage-detail-modal"].classList.remove("hidden");
 }
 els["menage-cancel"].addEventListener("click", () => { els["menage-detail-modal"].classList.add("hidden"); els["menages-modal"].classList.remove("hidden"); });
+els["menage-cancel-rdv"].addEventListener("click", () => {
+  els["menage-statut"].value = "RDV annulé (à reprogrammer)";
+  els["menage-date-rdv"].value = "";
+  els["menage-heure-rdv"].value = "";
+});
 
 function readAndCompressImage(file, maxWidth = 1280, quality = 0.65) {
   return new Promise((resolve, reject) => {
@@ -658,7 +749,10 @@ async function trySyncAll() {
     try {
       const payload = { ...item, idToken: auth.idToken };
       delete payload.id;
-      payload.action = item.kind === "menage" ? "update_menage" : "update";
+      if (item.kind === "localite_add") Object.assign(payload, item.localite);
+      payload.action = item.kind === "menage" ? "update_menage"
+        : item.kind === "localite_add" ? "add_localite"
+          : item.kind === "localite_visibility" ? "hide_localite" : "update";
       const res = await fetch(CFG.APPS_SCRIPT_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -706,10 +800,12 @@ function updateSyncBadge() {
 function renderSyncList() {
   if (state.pending.length === 0) { els["sync-hint"].style.display = "block"; els["sync-list"].innerHTML = ""; return; }
   els["sync-hint"].style.display = "none";
-  els["sync-list"].innerHTML = state.pending.map(p => p.kind === "menage"
-    ? `<div class="list-row"><div><div class="name">Ménage — ${p.statut || ""}</div><div class="sub">${p.photo_base64 ? "avec photo" : "sans photo"}</div></div><span class="badge attente">en attente</span></div>`
-    : `<div class="list-row"><div><div class="name">${p.nom}</div><div class="sub">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div></div><span class="badge attente">en attente</span></div>`
-  ).join("");
+  els["sync-list"].innerHTML = state.pending.map(p => {
+    if (p.kind === "menage") return `<div class="list-row"><div><div class="name">Ménage — ${p.statut || ""}</div><div class="sub">${p.photo_base64 ? "avec photo" : "sans photo"}</div></div><span class="badge attente">en attente</span></div>`;
+    if (p.kind === "localite_add") return `<div class="list-row"><div><div class="name">Nouvelle localité — ${p.localite.nom}</div><div class="sub">${p.localite.sous_prefecture || ""}</div></div><span class="badge attente">en attente</span></div>`;
+    if (p.kind === "localite_visibility") return `<div class="list-row"><div><div class="name">${p.masquee ? "Masquage" : "Réaffichage"} — ${p.nom}</div></div><span class="badge attente">en attente</span></div>`;
+    return `<div class="list-row"><div><div class="name">${p.nom}</div><div class="sub">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div></div><span class="badge attente">en attente</span></div>`;
+  }).join("");
 }
 
 /* ============================================================
@@ -870,6 +966,7 @@ async function loadAppData() {
   }
   renderMarkers();
   renderItinerary();
+  if (!els["hidden-localites-modal"].classList.contains("hidden")) renderHiddenLocalites();
   trySyncAll();
 }
 async function start() {

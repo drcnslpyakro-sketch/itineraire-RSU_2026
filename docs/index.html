@@ -47,6 +47,8 @@
     <div class="row">
       <button class="secondary" id="btn-toggle-unverified" title="Afficher/masquer les localités sans position connue">Sans position : afficher</button>
       <button class="secondary" id="btn-recalc-route">Recalculer l'itinéraire</button>
+      <button class="secondary" id="btn-add-localite" title="Ajouter une nouvelle localité au référentiel">+ Localité</button>
+      <button class="secondary" id="btn-hidden-localites" title="Voir et réafficher les localités masquées">Localités masquées</button>
     </div>
   </div>
 
@@ -123,6 +125,73 @@
     </div>
   </div>
 
+  <!-- Boîte de dialogue : ajout manuel d'une nouvelle localité -->
+  <div class="modal-backdrop hidden" id="add-localite-modal">
+    <div class="modal" style="max-height:88vh; overflow-y:auto;">
+      <h2>Ajouter une localité</h2>
+      <p>La localité sera ajoutée au référentiel partagé, visible par tous les opérateurs, avec le même statut qu'une localité classique.</p>
+
+      <div class="field-label">Nom *</div>
+      <input type="text" id="add-localite-nom" placeholder="Ex. Nouveau quartier" />
+
+      <div class="row" style="margin-top:10px;">
+        <div style="flex:1;">
+          <div class="field-label">Type</div>
+          <select id="add-localite-type">
+            <option value="Village">Village</option>
+            <option value="Quartier (confirmé)">Quartier</option>
+            <option value="Incertain">Incertain</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <div style="flex:1;">
+          <div class="field-label">Département *</div>
+          <input type="text" id="add-localite-departement" list="add-localite-departement-options" placeholder="Ex. ATTIEGOUAKRO" />
+          <datalist id="add-localite-departement-options"></datalist>
+        </div>
+        <div style="flex:1;">
+          <div class="field-label">Sous-préfecture *</div>
+          <input type="text" id="add-localite-sous-prefecture" list="add-localite-sous-prefecture-options" placeholder="Ex. ATTIEGOUAKRO" />
+          <datalist id="add-localite-sous-prefecture-options"></datalist>
+        </div>
+      </div>
+
+      <div class="field-label">Position GPS (optionnelle — capturable plus tard sur place)</div>
+      <div class="coord-compare">
+        <div class="coord-box">
+          <div class="label">Position captée</div>
+          <div class="value" id="add-localite-gps-coords">Aucune</div>
+        </div>
+        <div class="coord-box">
+          <div class="label">Précision</div>
+          <div class="value" id="add-localite-gps-accuracy">—</div>
+        </div>
+      </div>
+      <div class="row">
+        <button class="secondary" id="add-localite-capture-gps" type="button">Capturer ma position GPS</button>
+      </div>
+
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="secondary" id="add-localite-cancel">Annuler</button>
+        <button class="primary" id="add-localite-save">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Boîte de dialogue : localités masquées, réaffichage -->
+  <div class="modal-backdrop hidden" id="hidden-localites-modal">
+    <div class="modal" style="max-height:80vh; display:flex; flex-direction:column;">
+      <h2>Localités masquées</h2>
+      <p class="empty-hint" style="margin-bottom:10px;">Ces localités ont été retirées de la carte et de la recherche par un opérateur. Touchez « Réafficher » pour les remettre.</p>
+      <div id="hidden-localites-list" style="overflow-y:auto; flex:1;"></div>
+      <div class="modal-actions" style="margin-top:12px;">
+        <button class="secondary" id="hidden-localites-close">Fermer</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Boîte de dialogue : liste des ménages d'une localité -->
   <div class="modal-backdrop hidden" id="menages-modal">
     <div class="modal" style="max-height:80vh; display:flex; flex-direction:column;">
@@ -136,6 +205,7 @@
           <option value="Rendez-vous pris">Rendez-vous pris</option>
           <option value="Enquête réalisée">Enquête réalisée</option>
           <option value="Ménage introuvable">Ménage introuvable</option>
+          <option value="RDV annulé (à reprogrammer)">RDV annulé (à reprogrammer)</option>
         </select>
         <button class="secondary" id="menages-export" style="flex-shrink:0;">Exporter (.xlsx)</button>
       </div>
@@ -177,6 +247,7 @@
         <option>Ménage introuvable</option>
         <option>Refus du ménage</option>
         <option>Affecté à une autre équipe</option>
+        <option>RDV annulé (à reprogrammer)</option>
       </select>
 
       <div class="row" style="margin-top:10px;">
@@ -188,6 +259,9 @@
           <div class="field-label">Heure</div>
           <input type="time" id="menage-heure-rdv" style="width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--paper);">
         </div>
+      </div>
+      <div class="row" style="margin-top:6px;" id="menage-rdv-actions">
+        <button class="ghost" id="menage-cancel-rdv" type="button" style="flex:1;">Annuler le RDV (à reprogrammer)</button>
       </div>
 
       <div class="field-label">Équipe en charge</div>
