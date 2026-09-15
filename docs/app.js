@@ -155,7 +155,8 @@ const els = {};
   "net-status","net-status-text","route-status","search-input","search-results",
   "map","fab-toggle","sync-badge","bottom-panel","itineraire-list","itineraire-hint",
   "sync-list","sync-hint","btn-sync-now","btn-recalc-route","btn-toggle-unverified","btn-open-gmaps",
-  "btn-export-menages",
+  "btn-export-menages","export-columns-modal","export-columns-list","export-columns-all",
+  "export-columns-none","export-columns-cancel","export-columns-confirm",
   "btn-sign-out","gps-modal","gps-modal-title","gps-modal-sub","gps-old-coords",
   "gps-new-coords","gps-accuracy","gps-cancel","gps-confirm",
   "menages-modal","menages-modal-title","menages-search","menages-list","menages-close",
@@ -631,20 +632,63 @@ document.querySelectorAll(".panel-tab").forEach(tab => {
   });
 });
 els["btn-sign-out"].addEventListener("click", signOut);
+
+/* ============================================================
+   9. Export .xlsx des ménages travaillés (sélection de colonnes)
+   ============================================================ */
+let exportColumnsCache = null; // { key, label, required }[] — mis en cache après le 1er chargement
+async function fetchExportColumns() {
+  if (exportColumnsCache) return exportColumnsCache;
+  const url = `${CFG.APPS_SCRIPT_URL}?action=export_columns&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.auth_required) throw Object.assign(new Error(data.error), { authRequired: true });
+  exportColumnsCache = data.columns || [];
+  return exportColumnsCache;
+}
+function renderExportColumnsList(columns) {
+  els["export-columns-list"].innerHTML = columns.map(c => `
+    <label style="display:flex; align-items:center; gap:8px; padding:5px 0;">
+      <input type="checkbox" value="${c.key}" ${c.required ? "checked disabled" : "checked"} />
+      <span>${c.label}${c.required ? " (toujours inclus)" : ""}</span>
+    </label>
+  `).join("");
+}
 els["btn-export-menages"].addEventListener("click", async () => {
-  const btn = els["btn-export-menages"];
+  els["export-columns-list"].innerHTML = '<div class="empty-hint">Chargement…</div>';
+  els["export-columns-modal"].classList.remove("hidden");
+  try {
+    const columns = await fetchExportColumns();
+    renderExportColumnsList(columns);
+  } catch (e) {
+    if (e.authRequired) { els["export-columns-modal"].classList.add("hidden"); flagAuthProblem(e.message); }
+    else els["export-columns-list"].innerHTML = `<div class="empty-hint">Erreur : ${e.message}</div>`;
+  }
+});
+els["export-columns-cancel"].addEventListener("click", () => els["export-columns-modal"].classList.add("hidden"));
+els["export-columns-all"].addEventListener("click", () => {
+  els["export-columns-list"].querySelectorAll("input[type=checkbox]").forEach(cb => { if (!cb.disabled) cb.checked = true; });
+});
+els["export-columns-none"].addEventListener("click", () => {
+  els["export-columns-list"].querySelectorAll("input[type=checkbox]").forEach(cb => { if (!cb.disabled) cb.checked = false; });
+});
+els["export-columns-confirm"].addEventListener("click", async () => {
+  const selected = Array.from(els["export-columns-list"].querySelectorAll("input[type=checkbox]:checked")).map(cb => cb.value);
+  const btn = els["export-columns-confirm"];
   const label = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Génération en cours…";
   try {
-    const url = `${CFG.APPS_SCRIPT_URL}?action=export_menages&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
+    const colParam = encodeURIComponent(selected.join(","));
+    const url = `${CFG.APPS_SCRIPT_URL}?action=export_menages&colonnes=${colParam}&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
     const res = await fetch(url);
     const data = await res.json();
     if (data.auth_required) throw Object.assign(new Error(data.error), { authRequired: true });
     if (!data.ok) throw new Error(data.error || "Échec de l'export");
     window.open(data.url, "_blank");
+    els["export-columns-modal"].classList.add("hidden");
   } catch (e) {
-    if (e.authRequired) { flagAuthProblem(e.message); }
+    if (e.authRequired) { els["export-columns-modal"].classList.add("hidden"); flagAuthProblem(e.message); }
     else alert("Export impossible : " + e.message);
   } finally {
     btn.disabled = false;

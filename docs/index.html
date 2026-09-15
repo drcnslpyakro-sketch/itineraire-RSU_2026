@@ -136,6 +136,23 @@
     </div>
   </div>
 
+  <!-- Boîte de dialogue : sélection des colonnes à inclure dans l'export .xlsx -->
+  <div class="modal-backdrop hidden" id="export-columns-modal">
+    <div class="modal" style="max-height:80vh; display:flex; flex-direction:column;">
+      <h2>Colonnes à exporter</h2>
+      <p class="empty-hint" style="margin-bottom:10px;">Choisissez les colonnes à inclure dans le fichier .xlsx.</p>
+      <div class="row" style="margin-bottom:8px;">
+        <button class="ghost" id="export-columns-all" style="padding:6px 10px;">Tout cocher</button>
+        <button class="ghost" id="export-columns-none" style="padding:6px 10px;">Tout décocher</button>
+      </div>
+      <div id="export-columns-list" style="overflow-y:auto; flex:1;"><div class="empty-hint">Chargement…</div></div>
+      <div class="modal-actions" style="margin-top:12px;">
+        <button class="ghost" id="export-columns-cancel">Annuler</button>
+        <button class="primary" id="export-columns-confirm">Exporter</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Boîte de dialogue : fiche de suivi d'un ménage -->
   <div class="modal-backdrop hidden" id="menage-detail-modal">
     <div class="modal" style="max-height:85vh; overflow-y:auto;">
