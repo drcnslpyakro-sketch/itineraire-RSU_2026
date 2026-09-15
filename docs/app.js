@@ -737,6 +737,39 @@ async function fetchExportColumns() {
   exportColumnsCache = data.columns || [];
   return exportColumnsCache;
 }
+
+// Décode le contenu .xlsx (base64) renvoyé par le serveur et déclenche un vrai
+// téléchargement sur l'appareil — plus fiable que d'ouvrir un lien Drive, en
+// particulier sur mobile où window.open() peut ouvrir un aperçu au lieu de
+// télécharger selon le compte Google connecté dans le navigateur.
+function base64ToBlob(base64, mimeType) {
+  const byteChars = atob(base64);
+  const byteNumbers = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+  return new Blob([new Uint8Array(byteNumbers)], { type: mimeType || "application/octet-stream" });
+}
+function downloadXlsxToDevice(data) {
+  if (!data.filedata || !data.mimeType) {
+    // Le serveur n'a pas fourni de contenu direct (ancienne version du script,
+    // ou export volontairement limité) : repli sur le lien Drive.
+    if (data.url) window.open(data.url, "_blank");
+    return;
+  }
+  try {
+    const blob = base64ToBlob(data.filedata, data.mimeType);
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = data.filename || "export.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+  } catch (e) {
+    console.warn("Téléchargement direct impossible, repli sur le lien Drive:", e.message);
+    if (data.url) window.open(data.url, "_blank");
+  }
+}
 function renderExportColumnsList(columns) {
   els["export-columns-list"].innerHTML = columns.map(c => `
     <label style="display:flex; align-items:center; gap:8px; padding:5px 0;">
@@ -791,7 +824,7 @@ els["export-columns-confirm"].addEventListener("click", async () => {
     const data = await parseJsonResponse(res);
     if (data.auth_required) throw Object.assign(new Error(data.error), { authRequired: true });
     if (!data.ok) throw new Error(data.error || "Échec de l'export");
-    window.open(data.url, "_blank");
+    downloadXlsxToDevice(data);
     els["export-columns-modal"].classList.add("hidden");
   } catch (e) {
     if (e.authRequired) { els["export-columns-modal"].classList.add("hidden"); flagAuthProblem(e.message); }
