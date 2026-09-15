@@ -162,7 +162,7 @@ const els = {};
   "export-columns-none","export-columns-cancel","export-columns-confirm",
   "btn-sign-out","gps-modal","gps-modal-title","gps-modal-sub","gps-old-coords",
   "gps-new-coords","gps-accuracy","gps-cancel","gps-confirm",
-  "menages-modal","menages-modal-title","menages-search","menages-list","menages-close",
+  "menages-modal","menages-modal-title","menages-search","menages-statut-filter","menages-export","menages-list","menages-close",
   "menage-detail-modal","menage-detail-title","menage-detail-tel","menage-statut",
   "menage-date-rdv","menage-heure-rdv","menage-equipe","menage-observations",
   "menage-photo-input","menage-photo-preview","menage-cancel","menage-save"
@@ -488,19 +488,20 @@ async function openMenagesModal(cle) {
   state.currentMenageCle = cle;
   els["menages-modal-title"].textContent = loc ? `Ménages — ${loc.nom}` : "Ménages";
   els["menages-search"].value = "";
+  els["menages-statut-filter"].value = "";
   els["menages-modal"].classList.remove("hidden");
 
   const cached = state.menagesCache[cle];
   if (cached && isMenagesCacheFresh(cle)) {
     // Cache frais (< 24h) : affichage instantané, sans attendre le réseau.
     applyMenagePendingOverrides(cle, cached);
-    renderMenagesList(cached);
+    renderMenagesList();
     // Rafraîchissement silencieux en arrière-plan pour rester à jour, sans bloquer l'affichage.
     fetchMenages(cle).then(fresh => {
       setMenagesCache(cle, fresh);
       if (state.currentMenageCle === cle && !els["menages-modal"].classList.contains("hidden")) {
         applyMenagePendingOverrides(cle, fresh);
-        renderMenagesList(fresh);
+        renderMenagesList();
       }
     }).catch(() => { /* pas de réseau : le cache déjà affiché reste valable */ });
     return;
@@ -521,7 +522,7 @@ async function openMenagesModal(cle) {
     }
   }
   applyMenagePendingOverrides(cle, menages);
-  renderMenagesList(menages);
+  renderMenagesList();
 }
 function applyMenagePendingOverrides(cle, menages) {
   state.pending.filter(p => p.kind === "menage" && p.cle === cle).forEach(o => {
@@ -539,13 +540,21 @@ function applyMenagePendingOverrides(cle, menages) {
 function statutBadgeClass(statut) {
   return statut === "Enquête réalisée" ? "verifiee" : "attente";
 }
-function renderMenagesList(menages) {
+function currentFilteredMenages() {
+  const all = state.menagesCache[state.currentMenageCle] || [];
   const q = els["menages-search"].value.trim().toLowerCase();
-  const filtered = q ? menages.filter(m =>
-    (m.nom_chef_menage||"").toLowerCase().includes(q) ||
-    String(m.tel_chef_menage||"").includes(q) ||
-    String(m.id_menage||"").toLowerCase().includes(q)
-  ) : menages;
+  const statut = els["menages-statut-filter"].value;
+  return all.filter(m => {
+    const matchQ = !q ||
+      (m.nom_chef_menage||"").toLowerCase().includes(q) ||
+      String(m.tel_chef_menage||"").includes(q) ||
+      String(m.id_menage||"").toLowerCase().includes(q);
+    const matchStatut = !statut || (m.statut || "Non traité") === statut;
+    return matchQ && matchStatut;
+  });
+}
+function renderMenagesList() {
+  const filtered = currentFilteredMenages();
   if (filtered.length === 0) { els["menages-list"].innerHTML = '<div class="empty-hint">Aucun ménage trouvé.</div>'; return; }
   els["menages-list"].innerHTML = filtered.map(m => `
     <div class="list-row" data-id="${m.id_menage}" style="cursor:pointer;">
@@ -556,7 +565,8 @@ function renderMenagesList(menages) {
     </div>`).join("");
   els["menages-list"].querySelectorAll("[data-id]").forEach(row => row.addEventListener("click", () => openMenageDetail(row.dataset.id)));
 }
-els["menages-search"].addEventListener("input", () => renderMenagesList(state.menagesCache[state.currentMenageCle] || []));
+els["menages-search"].addEventListener("input", () => renderMenagesList());
+els["menages-statut-filter"].addEventListener("change", () => renderMenagesList());
 els["menages-close"].addEventListener("click", () => els["menages-modal"].classList.add("hidden"));
 
 let menageTarget = null, menagePhotoBase64 = null;
@@ -672,7 +682,7 @@ async function refreshPendingAndData(refetchRemote) {
   renderItinerary();
   if (state.currentMenageCle && !els["menages-modal"].classList.contains("hidden")) {
     const menages = state.menagesCache[state.currentMenageCle];
-    if (menages) { applyMenagePendingOverrides(state.currentMenageCle, menages); renderMenagesList(menages); }
+    if (menages) { applyMenagePendingOverrides(state.currentMenageCle, menages); renderMenagesList(); }
   }
 }
 function updateSyncBadge() {
@@ -735,7 +745,8 @@ function renderExportColumnsList(columns) {
     </label>
   `).join("");
 }
-els["btn-export-menages"].addEventListener("click", async () => {
+let exportContext = { type: "operateur" };
+async function openExportColumnsModal() {
   els["export-columns-list"].innerHTML = '<div class="empty-hint">Chargement…</div>';
   els["export-columns-modal"].classList.remove("hidden");
   try {
@@ -745,6 +756,14 @@ els["btn-export-menages"].addEventListener("click", async () => {
     if (e.authRequired) { els["export-columns-modal"].classList.add("hidden"); flagAuthProblem(e.message); }
     else els["export-columns-list"].innerHTML = `<div class="empty-hint">Erreur : ${e.message}</div>`;
   }
+}
+els["btn-export-menages"].addEventListener("click", () => {
+  exportContext = { type: "operateur" };
+  openExportColumnsModal();
+});
+els["menages-export"].addEventListener("click", () => {
+  exportContext = { type: "localite", cle: state.currentMenageCle, statut: els["menages-statut-filter"].value };
+  openExportColumnsModal();
 });
 els["export-columns-cancel"].addEventListener("click", () => els["export-columns-modal"].classList.add("hidden"));
 els["export-columns-all"].addEventListener("click", () => {
@@ -761,7 +780,13 @@ els["export-columns-confirm"].addEventListener("click", async () => {
   btn.textContent = "Génération en cours…";
   try {
     const colParam = encodeURIComponent(selected.join(","));
-    const url = `${CFG.APPS_SCRIPT_URL}?action=export_menages&colonnes=${colParam}&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
+    let url;
+    if (exportContext.type === "localite") {
+      const statutParam = exportContext.statut ? `&statut=${encodeURIComponent(exportContext.statut)}` : "";
+      url = `${CFG.APPS_SCRIPT_URL}?action=export_menages_localite&cle=${encodeURIComponent(exportContext.cle)}${statutParam}&colonnes=${colParam}&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
+    } else {
+      url = `${CFG.APPS_SCRIPT_URL}?action=export_menages&colonnes=${colParam}&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
+    }
     const res = await fetch(url);
     const data = await parseJsonResponse(res);
     if (data.auth_required) throw Object.assign(new Error(data.error), { authRequired: true });

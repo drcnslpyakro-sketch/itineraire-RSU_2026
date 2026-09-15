@@ -129,6 +129,16 @@
       <h2 id="menages-modal-title">Ménages</h2>
       <p class="empty-hint" style="margin-bottom:10px;">Touchez un ménage pour actualiser son statut de traitement.</p>
       <input type="text" id="menages-search" placeholder="Rechercher par nom, téléphone ou identifiant…" style="margin-bottom:8px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper);" />
+      <div class="row" style="margin-bottom:8px; gap:8px;">
+        <select id="menages-statut-filter" style="flex:1; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); font-size:0.85rem;">
+          <option value="">Tous les statuts</option>
+          <option value="Non traité">Non traité</option>
+          <option value="Rendez-vous pris">Rendez-vous pris</option>
+          <option value="Enquête réalisée">Enquête réalisée</option>
+          <option value="Ménage introuvable">Ménage introuvable</option>
+        </select>
+        <button class="secondary" id="menages-export" style="flex-shrink:0;">Exporter (.xlsx)</button>
+      </div>
       <div id="menages-list" style="overflow-y:auto; flex:1;"></div>
       <div class="modal-actions" style="margin-top:12px;">
         <button class="secondary" id="menages-close">Fermer</button>
