@@ -533,6 +533,10 @@ function applyMenagePendingOverrides(cle, menages) {
       if (o.heure_rdv !== undefined) m.heure_rdv = o.heure_rdv;
       if (o.observations !== undefined) m.observations = o.observations;
       if (o.equipe !== undefined) m.equipe = o.equipe;
+      // Modification faite depuis cet appareil par l'opérateur connecté : on l'attribue
+      // tout de suite (avant même la synchronisation), sinon la restriction d'affichage
+      // par opérateur pourrait faire disparaître le ménage de sa propre liste.
+      if (auth.email) m.dernier_operateur_email = auth.email;
       m._enAttente = true;
     }
   });
@@ -544,12 +548,21 @@ function currentFilteredMenages() {
   const all = state.menagesCache[state.currentMenageCle] || [];
   const q = els["menages-search"].value.trim().toLowerCase();
   const statut = els["menages-statut-filter"].value;
+  const monEmail = (auth.email || "").toLowerCase();
   return all.filter(m => {
+    const statutActuel = m.statut || "Non traité";
+    // "Non traité" reste visible de tous, sans restriction : ce sont les ménages
+    // encore à prendre en charge par n'importe quel opérateur. Tout autre statut
+    // n'est affiché que s'il a été posé par l'opérateur actuellement connecté —
+    // pour ne pas encombrer chacun avec le travail déjà pris en charge par les autres.
+    const mien = statutActuel === "Non traité" ||
+      (m.dernier_operateur_email && String(m.dernier_operateur_email).toLowerCase() === monEmail);
+    if (!mien) return false;
     const matchQ = !q ||
       (m.nom_chef_menage||"").toLowerCase().includes(q) ||
       String(m.tel_chef_menage||"").includes(q) ||
       String(m.id_menage||"").toLowerCase().includes(q);
-    const matchStatut = !statut || (m.statut || "Non traité") === statut;
+    const matchStatut = !statut || statutActuel === statut;
     return matchQ && matchStatut;
   });
 }
