@@ -144,11 +144,14 @@ function updateAccountCard() {
    2. État applicatif
    ============================================================ */
 const CFG = window.APP_CONFIG;
+const MENAGES_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 heures
+const MENAGES_CACHE_STORAGE_KEY = "menagesCacheV1";
 const state = {
   localites: [], markersByCle: {}, pending: [], itinerary: [],
   showUnverified: true, map: null, routeLine: null,
-  currentMenageCle: null, menagesCache: {}
+  currentMenageCle: null, menagesCache: {}, menagesCacheTs: {}
 };
+loadMenagesCacheFromStorage();
 
 const els = {};
 [
@@ -429,6 +432,49 @@ els["gps-confirm"].addEventListener("click", async () => {
 /* ============================================================
    8. Suivi terrain des ménages
    ============================================================ */
+/* ============================================================
+   Cache des listes de ménages par localité, tamponné 24h
+   ============================================================
+   Objectif : rendre "Voir les ménages" rapide et accessible même hors-ligne,
+   sans resolliciter le serveur à chaque ouverture. La liste chargée une fois
+   reste utilisable pendant 24h (persistée dans localStorage, donc conservée
+   même après fermeture de l'app), puis est considérée périmée et reforcée
+   à se rafraîchir en ligne.
+*/
+function loadMenagesCacheFromStorage() {
+  try {
+    const raw = localStorage.getItem(MENAGES_CACHE_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    Object.keys(parsed).forEach(cle => {
+      const entry = parsed[cle];
+      if (entry && entry.ts && (now - entry.ts) < MENAGES_CACHE_TTL_MS) {
+        state.menagesCache[cle] = entry.menages;
+        state.menagesCacheTs[cle] = entry.ts;
+      }
+    });
+  } catch (e) { /* cache corrompu ou indisponible : on repart à vide, sans bloquer l'app */ }
+}
+function saveMenagesCacheToStorage() {
+  try {
+    const out = {};
+    Object.keys(state.menagesCache).forEach(cle => {
+      out[cle] = { menages: state.menagesCache[cle], ts: state.menagesCacheTs[cle] || Date.now() };
+    });
+    localStorage.setItem(MENAGES_CACHE_STORAGE_KEY, JSON.stringify(out));
+  } catch (e) { /* quota localStorage dépassé ou indisponible : le cache reste seulement en mémoire */ }
+}
+function isMenagesCacheFresh(cle) {
+  const ts = state.menagesCacheTs[cle];
+  return !!ts && (Date.now() - ts) < MENAGES_CACHE_TTL_MS;
+}
+function setMenagesCache(cle, menages) {
+  state.menagesCache[cle] = menages;
+  state.menagesCacheTs[cle] = Date.now();
+  saveMenagesCacheToStorage();
+}
+
 async function fetchMenages(cle) {
   const url = `${CFG.APPS_SCRIPT_URL}?action=menages&cle=${encodeURIComponent(cle)}&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
   const res = await fetch(url);
@@ -442,15 +488,33 @@ async function openMenagesModal(cle) {
   state.currentMenageCle = cle;
   els["menages-modal-title"].textContent = loc ? `Ménages — ${loc.nom}` : "Ménages";
   els["menages-search"].value = "";
-  els["menages-list"].innerHTML = '<div class="empty-hint">Chargement…</div>';
   els["menages-modal"].classList.remove("hidden");
+
+  const cached = state.menagesCache[cle];
+  if (cached && isMenagesCacheFresh(cle)) {
+    // Cache frais (< 24h) : affichage instantané, sans attendre le réseau.
+    applyMenagePendingOverrides(cle, cached);
+    renderMenagesList(cached);
+    // Rafraîchissement silencieux en arrière-plan pour rester à jour, sans bloquer l'affichage.
+    fetchMenages(cle).then(fresh => {
+      setMenagesCache(cle, fresh);
+      if (state.currentMenageCle === cle && !els["menages-modal"].classList.contains("hidden")) {
+        applyMenagePendingOverrides(cle, fresh);
+        renderMenagesList(fresh);
+      }
+    }).catch(() => { /* pas de réseau : le cache déjà affiché reste valable */ });
+    return;
+  }
+
+  // Pas de cache, ou cache périmé (> 24h) : chargement bloquant comme avant.
+  els["menages-list"].innerHTML = '<div class="empty-hint">Chargement…</div>';
   let menages;
   try {
     menages = await fetchMenages(cle);
-    state.menagesCache[cle] = menages;
+    setMenagesCache(cle, menages);
   } catch (e) {
     if (e.authRequired) flagAuthProblem(e.message);
-    menages = state.menagesCache[cle];
+    menages = state.menagesCache[cle]; // repli sur un cache périmé plutôt que rien, si hors-ligne
     if (!menages) {
       els["menages-list"].innerHTML = `<div class="empty-hint">Liste indisponible hors-ligne pour cette localité (pas encore consultée en ligne). ${e.message || ""}</div>`;
       return;
