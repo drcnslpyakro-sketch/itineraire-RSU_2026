@@ -154,7 +154,7 @@ const els = {};
 [
   "net-status","net-status-text","route-status","search-input","search-results",
   "map","fab-toggle","sync-badge","bottom-panel","itineraire-list","itineraire-hint",
-  "sync-list","sync-hint","btn-sync-now","btn-recalc-route","btn-toggle-unverified",
+  "sync-list","sync-hint","btn-sync-now","btn-recalc-route","btn-toggle-unverified","btn-open-gmaps",
   "btn-sign-out","gps-modal","gps-modal-title","gps-modal-sub","gps-old-coords",
   "gps-new-coords","gps-accuracy","gps-cancel","gps-confirm",
   "menages-modal","menages-modal-title","menages-search","menages-list","menages-close",
@@ -321,6 +321,7 @@ function renderItinerary() {
 async function computeRoute() {
   if (state.routeLine) { state.map.removeLayer(state.routeLine); state.routeLine = null; }
   const stops = state.itinerary.map(cle => state.localites.find(l => l.cle === cle)).filter(l => l && l.lat != null && l.lng != null);
+  els["btn-open-gmaps"].disabled = stops.length === 0;
   if (stops.length === 0) {
     els["route-status"].textContent = navigator.onLine
       ? `${state.localites.length} localités chargées — sélectionnez des étapes pour tracer un itinéraire`
@@ -353,6 +354,17 @@ async function computeRoute() {
   }
 }
 els["btn-recalc-route"].addEventListener("click", computeRoute);
+function openInGoogleMaps() {
+  const stops = state.itinerary.map(cle => state.localites.find(l => l.cle === cle)).filter(l => l && l.lat != null && l.lng != null);
+  if (stops.length === 0) return;
+  const origin = `${CFG.CENTRE.lat},${CFG.CENTRE.lng}`;
+  const destination = `${stops[stops.length - 1].lat},${stops[stops.length - 1].lng}`;
+  const waypoints = stops.slice(0, -1).map(s => `${s.lat},${s.lng}`).join("|");
+  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&origin=${origin}&destination=${destination}`;
+  if (waypoints) url += `&waypoints=${encodeURIComponent(waypoints)}`;
+  window.open(url, "_blank");
+}
+els["btn-open-gmaps"].addEventListener("click", openInGoogleMaps);
 els["btn-toggle-unverified"].addEventListener("click", () => {
   state.showUnverified = !state.showUnverified;
   els["btn-toggle-unverified"].textContent = state.showUnverified ? "Sans position : afficher" : "Sans position : masquer";
