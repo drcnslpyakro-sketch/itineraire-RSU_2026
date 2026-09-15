@@ -155,6 +155,7 @@ const els = {};
   "net-status","net-status-text","route-status","search-input","search-results",
   "map","fab-toggle","sync-badge","bottom-panel","itineraire-list","itineraire-hint",
   "sync-list","sync-hint","btn-sync-now","btn-recalc-route","btn-toggle-unverified","btn-open-gmaps",
+  "btn-export-menages",
   "btn-sign-out","gps-modal","gps-modal-title","gps-modal-sub","gps-old-coords",
   "gps-new-coords","gps-accuracy","gps-cancel","gps-confirm",
   "menages-modal","menages-modal-title","menages-search","menages-list","menages-close",
@@ -630,6 +631,26 @@ document.querySelectorAll(".panel-tab").forEach(tab => {
   });
 });
 els["btn-sign-out"].addEventListener("click", signOut);
+els["btn-export-menages"].addEventListener("click", async () => {
+  const btn = els["btn-export-menages"];
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Génération en cours…";
+  try {
+    const url = `${CFG.APPS_SCRIPT_URL}?action=export_menages&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.auth_required) throw Object.assign(new Error(data.error), { authRequired: true });
+    if (!data.ok) throw new Error(data.error || "Échec de l'export");
+    window.open(data.url, "_blank");
+  } catch (e) {
+    if (e.authRequired) { flagAuthProblem(e.message); }
+    else alert("Export impossible : " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+});
 
 /* ============================================================
    11. Démarrage
