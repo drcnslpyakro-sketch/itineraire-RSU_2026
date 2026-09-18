@@ -206,6 +206,7 @@
           <option value="Enquête réalisée">Enquête réalisée</option>
           <option value="Ménage introuvable">Ménage introuvable</option>
           <option value="RDV annulé (à reprogrammer)">RDV annulé (à reprogrammer)</option>
+          <option value="__SANS_NUMERO__">— Sans numéro de téléphone —</option>
         </select>
         <button class="secondary" id="menages-export" style="flex-shrink:0;">Exporter (.xlsx)</button>
       </div>
@@ -270,9 +271,19 @@
       <div class="field-label">Observations</div>
       <textarea id="menage-observations" rows="3" style="width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); font-family:inherit; font-size:0.88rem;"></textarea>
 
-      <div class="field-label">Photo de la visite (optionnelle)</div>
-      <input type="file" id="menage-photo-input" accept="image/*" capture="environment">
-      <div id="menage-photo-preview" style="margin-top:8px;"></div>
+      <div class="field-label">Fichiers du ménage (photos, documents)</div>
+      <p class="empty-hint" style="margin:-2px 0 8px;">Plusieurs photos et documents (PDF ou image) peuvent être ajoutés.</p>
+      <div class="row">
+        <label class="file-btn">
+          📷 Prendre une photo
+          <input type="file" id="menage-photo-capture" accept="image/*" capture="environment">
+        </label>
+        <label class="file-btn">
+          📎 Ajouter des fichiers
+          <input type="file" id="menage-fichiers-input" accept="image/*,application/pdf" multiple>
+        </label>
+      </div>
+      <div id="menage-fichiers-preview" style="margin-top:10px; display:flex; flex-direction:column; gap:6px;"></div>
 
       <div class="modal-actions" style="margin-top:16px;">
         <button class="secondary" id="menage-cancel">Annuler</button>

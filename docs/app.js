@@ -171,7 +171,7 @@ const els = {};
   "menages-modal","menages-modal-title","menages-search","menages-statut-filter","menages-export","menages-list","menages-close",
   "menage-detail-modal","menage-detail-title","menage-detail-tel","menage-statut",
   "menage-date-rdv","menage-heure-rdv","menage-equipe","menage-observations",
-  "menage-photo-input","menage-photo-preview","menage-cancel","menage-save"
+  "menage-photo-capture","menage-fichiers-input","menage-fichiers-preview","menage-cancel","menage-save"
   ,"menage-cancel-rdv"
 ].forEach(id => els[id] = document.getElementById(id));
 
@@ -619,6 +619,13 @@ function applyMenagePendingOverrides(cle, menages) {
       if (o.heure_rdv !== undefined) m.heure_rdv = o.heure_rdv;
       if (o.observations !== undefined) m.observations = o.observations;
       if (o.equipe !== undefined) m.equipe = o.equipe;
+      // Fichiers pas encore envoyés (pas de lien Drive tant que la synchronisation
+      // n'a pas eu lieu) : on garde juste un compteur pour informer l'opérateur,
+      // sans modifier m.lien_photo (qui ne contient que des fichiers réellement
+      // envoyés et confirmés par le serveur).
+      if (o.fichiers && o.fichiers.length) {
+        m._fichiersEnAttente = (m._fichiersEnAttente || 0) + o.fichiers.length;
+      }
       // Modification faite depuis cet appareil par l'opérateur connecté : on l'attribue
       // tout de suite (avant même la synchronisation), sinon la restriction d'affichage
       // par opérateur pourrait faire disparaître le ménage de sa propre liste.
@@ -629,6 +636,18 @@ function applyMenagePendingOverrides(cle, menages) {
 }
 function statutBadgeClass(statut) {
   return statut === "Enquête réalisée" ? "verifiee" : "attente";
+}
+// Valeur spéciale du filtre "menages-statut-filter" : ne correspond à aucun
+// vrai statut de traitement, mais à un critère orthogonal (numéro de
+// téléphone du chef de ménage absent/vide). Doit rester identique côté
+// serveur (voir SANS_NUMERO_FILTRE dans Code.gs) puisque c'est cette même
+// chaîne qui est transmise telle quelle en paramètre "statut" de l'export.
+const SANS_NUMERO_FILTRE = "__SANS_NUMERO__";
+// Un numéro composé uniquement d'espaces, de tirets ou de zéros n'est pas un
+// numéro exploitable sur le terrain : on le traite comme "sans numéro".
+function telEstRenseigne(tel) {
+  const s = String(tel || "").trim();
+  return s !== "" && /[1-9]/.test(s);
 }
 function currentFilteredMenages() {
   const all = state.menagesCache[state.currentMenageCle] || [];
@@ -648,32 +667,40 @@ function currentFilteredMenages() {
       (m.nom_chef_menage||"").toLowerCase().includes(q) ||
       String(m.tel_chef_menage||"").includes(q) ||
       String(m.id_menage||"").toLowerCase().includes(q);
-    const matchStatut = !statut || statutActuel === statut;
+    // "Sans numéro" est un critère à part, orthogonal au statut de traitement
+    // (un ménage sans numéro peut être à n'importe quel statut) — on ne le
+    // confond donc pas avec une comparaison d'égalité sur statutActuel.
+    const matchStatut = !statut
+      ? true
+      : (statut === SANS_NUMERO_FILTRE ? !telEstRenseigne(m.tel_chef_menage) : statutActuel === statut);
     return matchQ && matchStatut;
   });
 }
 function renderMenagesList() {
   const filtered = currentFilteredMenages();
   if (filtered.length === 0) { els["menages-list"].innerHTML = '<div class="empty-hint">Aucun ménage trouvé.</div>'; return; }
-  els["menages-list"].innerHTML = filtered.map(m => `
+  els["menages-list"].innerHTML = filtered.map(m => {
+    const sansNumero = !telEstRenseigne(m.tel_chef_menage);
+    return `
     <div class="list-row" data-id="${m.id_menage}" style="cursor:pointer;">
       <div><div class="name">${m.nom_chef_menage || "(nom non renseigné)"}</div>
-      <div class="sub">${m.tel_chef_menage || "sans téléphone"} · ${m.village_quartier || ""}${m._enAttente ? " · en attente d'envoi" : ""}</div>
+      <div class="sub">${sansNumero ? `<span class="badge attente">sans numéro</span>` : m.tel_chef_menage} · ${m.village_quartier || ""}${m._enAttente ? " · en attente d'envoi" : ""}</div>
       <div class="sub" style="opacity:0.7;">${m.id_menage || ""}</div></div>
       <span class="badge ${statutBadgeClass(m.statut)}">${m.statut || "Non traité"}</span>
-    </div>`).join("");
+    </div>`;
+  }).join("");
   els["menages-list"].querySelectorAll("[data-id]").forEach(row => row.addEventListener("click", () => openMenageDetail(row.dataset.id)));
 }
 els["menages-search"].addEventListener("input", () => renderMenagesList());
 els["menages-statut-filter"].addEventListener("change", () => renderMenagesList());
 els["menages-close"].addEventListener("click", () => els["menages-modal"].classList.add("hidden"));
 
-let menageTarget = null, menagePhotoBase64 = null;
+let menageTarget = null, menageNewFiles = [];
 function openMenageDetail(idMenage) {
   const menages = state.menagesCache[state.currentMenageCle] || [];
   const m = menages.find(x => x.id_menage === idMenage);
   if (!m) return;
-  menageTarget = m; menagePhotoBase64 = null;
+  menageTarget = m; menageNewFiles = [];
   els["menage-detail-title"].textContent = m.nom_chef_menage || "Ménage";
   els["menage-detail-tel"].textContent = m.tel_chef_menage ? `Téléphone : ${m.tel_chef_menage}` : "Téléphone non renseigné";
   els["menage-statut"].value = m.statut || "Non traité";
@@ -681,8 +708,9 @@ function openMenageDetail(idMenage) {
   els["menage-heure-rdv"].value = m.heure_rdv || "";
   els["menage-equipe"].value = m.equipe || "";
   els["menage-observations"].value = m.observations || "";
-  els["menage-photo-input"].value = "";
-  els["menage-photo-preview"].innerHTML = m.lien_photo ? `<a href="${m.lien_photo}" target="_blank" rel="noopener">Photo existante</a>` : "";
+  els["menage-photo-capture"].value = "";
+  els["menage-fichiers-input"].value = "";
+  renderMenageFichiersPreview();
   els["menages-modal"].classList.add("hidden");
   els["menage-detail-modal"].classList.remove("hidden");
 }
@@ -710,14 +738,96 @@ function readAndCompressImage(file, maxWidth = 1280, quality = 0.65) {
     reader.onerror = reject; reader.readAsDataURL(file);
   });
 }
-els["menage-photo-input"].addEventListener("change", async () => {
-  const file = els["menage-photo-input"].files[0];
+// Taille max d'un document (PDF) accepté : au-delà, l'envoi devient trop
+// lourd pour une connexion mobile terrain. Les photos ne sont pas concernées
+// par cette limite car elles sont systématiquement compressées avant envoi
+// (voir readAndCompressImage).
+const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024; // 8 Mo
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+function fileIconFor(type) { return type === "application/pdf" ? "📄" : "🖼️"; }
+
+// Ajoute un fichier (photo ou document PDF) choisi par l'opérateur à la liste
+// des fichiers de ce ménage en attente d'envoi. Les images sont compressées
+// (comme avant, une seule photo à la fois) ; les PDF sont lus tels quels.
+async function addMenageFile(file) {
   if (!file) return;
-  els["menage-photo-preview"].innerHTML = "Compression de la photo…";
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name || "");
+  const isImage = !isPdf && (file.type.startsWith("image/") || /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(file.name || ""));
+  if (!isPdf && !isImage) {
+    alert(`« ${file.name} » : seuls les photos et les documents PDF sont acceptés.`);
+    return;
+  }
+  if (isPdf && file.size > MAX_DOCUMENT_BYTES) {
+    alert(`« ${file.name} » dépasse la taille maximale autorisée (8 Mo).`);
+    return;
+  }
+  const entry = { id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, nom: file.name || (isPdf ? "document.pdf" : "photo.jpg") };
   try {
-    menagePhotoBase64 = await readAndCompressImage(file);
-    els["menage-photo-preview"].innerHTML = `<img src="${menagePhotoBase64}" style="max-width:100%;border-radius:8px;">`;
-  } catch (e) { els["menage-photo-preview"].innerHTML = "Échec de lecture de la photo."; }
+    if (isImage) {
+      entry.base64 = await readAndCompressImage(file);
+      entry.type = "image/jpeg";
+    } else {
+      entry.base64 = await readFileAsDataUrl(file);
+      entry.type = "application/pdf";
+    }
+  } catch (e) {
+    alert(`Échec de lecture de « ${file.name} ».`);
+    return;
+  }
+  menageNewFiles.push(entry);
+  renderMenageFichiersPreview();
+}
+function removeMenageNewFile(id) {
+  menageNewFiles = menageNewFiles.filter(f => f.id !== id);
+  renderMenageFichiersPreview();
+}
+function renderMenageFichiersPreview() {
+  const container = els["menage-fichiers-preview"];
+  const existants = (menageTarget && menageTarget.fichiers) || [];
+  const parts = [];
+  existants.forEach(f => {
+    parts.push(`
+      <div class="file-chip">
+        <div class="file-icon">${fileIconFor(f.type)}</div>
+        <a class="file-name" href="${f.url}" target="_blank" rel="noopener">${f.nom || "Fichier"}</a>
+        <span class="file-status">déjà envoyé</span>
+      </div>`);
+  });
+  menageNewFiles.forEach(f => {
+    const thumb = f.type === "image/jpeg"
+      ? `<img class="file-thumb" src="${f.base64}">`
+      : `<div class="file-icon">${fileIconFor(f.type)}</div>`;
+    parts.push(`
+      <div class="file-chip pending">
+        ${thumb}
+        <span class="file-name">${f.nom}</span>
+        <span class="file-status">à envoyer</span>
+        <button type="button" class="file-remove" data-remove-file="${f.id}" title="Retirer">×</button>
+      </div>`);
+  });
+  if (menageTarget && menageTarget._fichiersEnAttente) {
+    parts.push(`<div class="empty-hint">${menageTarget._fichiersEnAttente} fichier(s) d'un envoi précédent déjà en file d'attente de synchronisation.</div>`);
+  }
+  container.innerHTML = parts.length ? parts.join("") : '<div class="empty-hint">Aucun fichier pour ce ménage.</div>';
+  container.querySelectorAll("[data-remove-file]").forEach(btn => btn.onclick = () => removeMenageNewFile(btn.dataset.removeFile));
+}
+els["menage-photo-capture"].addEventListener("change", async () => {
+  const file = els["menage-photo-capture"].files[0];
+  els["menage-photo-capture"].value = "";
+  await addMenageFile(file);
+});
+els["menage-fichiers-input"].addEventListener("change", async () => {
+  const files = Array.from(els["menage-fichiers-input"].files || []);
+  els["menage-fichiers-input"].value = "";
+  for (const file of files) await addMenageFile(file);
 });
 els["menage-save"].addEventListener("click", async () => {
   if (!menageTarget) return;
@@ -728,9 +838,10 @@ els["menage-save"].addEventListener("click", async () => {
     heure_rdv: els["menage-heure-rdv"].value,
     equipe: els["menage-equipe"].value.trim(),
     observations: els["menage-observations"].value.trim(),
-    photo_base64: menagePhotoBase64 || undefined,
+    fichiers: menageNewFiles.length ? menageNewFiles.map(f => ({ nom: f.nom, type: f.type, base64: f.base64 })) : undefined,
     timestamp: new Date().toISOString()
   });
+  menageNewFiles = [];
   els["menage-detail-modal"].classList.add("hidden");
   await refreshPendingAndData(false);
   trySyncAll();
@@ -801,7 +912,7 @@ function renderSyncList() {
   if (state.pending.length === 0) { els["sync-hint"].style.display = "block"; els["sync-list"].innerHTML = ""; return; }
   els["sync-hint"].style.display = "none";
   els["sync-list"].innerHTML = state.pending.map(p => {
-    if (p.kind === "menage") return `<div class="list-row"><div><div class="name">Ménage — ${p.statut || ""}</div><div class="sub">${p.photo_base64 ? "avec photo" : "sans photo"}</div></div><span class="badge attente">en attente</span></div>`;
+    if (p.kind === "menage") return `<div class="list-row"><div><div class="name">Ménage — ${p.statut || ""}</div><div class="sub">${p.fichiers && p.fichiers.length ? p.fichiers.length + " fichier(s) joint(s)" : "sans fichier"}</div></div><span class="badge attente">en attente</span></div>`;
     if (p.kind === "localite_add") return `<div class="list-row"><div><div class="name">Nouvelle localité — ${p.localite.nom}</div><div class="sub">${p.localite.sous_prefecture || ""}</div></div><span class="badge attente">en attente</span></div>`;
     if (p.kind === "localite_visibility") return `<div class="list-row"><div><div class="name">${p.masquee ? "Masquage" : "Réaffichage"} — ${p.nom}</div></div><span class="badge attente">en attente</span></div>`;
     return `<div class="list-row"><div><div class="name">${p.nom}</div><div class="sub">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div></div><span class="badge attente">en attente</span></div>`;
