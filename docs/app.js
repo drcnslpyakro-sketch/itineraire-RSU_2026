@@ -171,6 +171,7 @@ const els = {};
   "menages-modal","menages-modal-title","menages-search","menages-statut-filter","menages-export","menages-list","menages-close",
   "menage-detail-modal","menage-detail-title","menage-detail-tel","menage-statut","menage-statut-auto-hint",
   "menage-date-rdv","menage-heure-rdv","menage-equipe","menage-observations",
+  "menage-remuneration","menage-education","menage-sante","menage-logement","menage-alimentation","menage-choc",
   "menage-photo-capture","menage-fichiers-input","menage-fichiers-preview","menage-cancel","menage-save"
   ,"menage-cancel-rdv",
   "file-preview-modal","file-preview-title","file-preview-body","file-preview-close","file-preview-open-external"
@@ -620,6 +621,12 @@ function applyMenagePendingOverrides(cle, menages) {
       if (o.heure_rdv !== undefined) m.heure_rdv = o.heure_rdv;
       if (o.observations !== undefined) m.observations = o.observations;
       if (o.equipe !== undefined) m.equipe = o.equipe;
+      if (o.remuneration !== undefined) m.remuneration = o.remuneration;
+      if (o.education !== undefined) m.education = o.education;
+      if (o.sante !== undefined) m.sante = o.sante;
+      if (o.logement !== undefined) m.logement = o.logement;
+      if (o.alimentation !== undefined) m.alimentation = o.alimentation;
+      if (o.choc !== undefined) m.choc = o.choc;
       // Fichiers pas encore envoyés (pas de lien Drive tant que la synchronisation
       // n'a pas eu lieu) : on garde juste un compteur pour informer l'opérateur,
       // sans modifier m.lien_photo (qui ne contient que des fichiers réellement
@@ -709,6 +716,12 @@ function openMenageDetail(idMenage) {
   els["menage-heure-rdv"].value = m.heure_rdv || "";
   els["menage-equipe"].value = m.equipe || "";
   els["menage-observations"].value = m.observations || "";
+  els["menage-remuneration"].value = m.remuneration || "";
+  els["menage-education"].value = m.education || "";
+  els["menage-sante"].value = m.sante || "";
+  els["menage-logement"].value = m.logement || "";
+  els["menage-alimentation"].value = m.alimentation || "";
+  els["menage-choc"].value = m.choc || "";
   els["menage-photo-capture"].value = "";
   els["menage-fichiers-input"].value = "";
   els["menage-statut-auto-hint"].style.display = "none";
@@ -901,6 +914,12 @@ els["menage-save"].addEventListener("click", async () => {
     heure_rdv: els["menage-heure-rdv"].value,
     equipe: els["menage-equipe"].value.trim(),
     observations: els["menage-observations"].value.trim(),
+    remuneration: els["menage-remuneration"].value.trim(),
+    education: els["menage-education"].value.trim(),
+    sante: els["menage-sante"].value.trim(),
+    logement: els["menage-logement"].value.trim(),
+    alimentation: els["menage-alimentation"].value.trim(),
+    choc: els["menage-choc"].value.trim(),
     fichiers: menageNewFiles.length ? menageNewFiles.map(f => ({ nom: f.nom, type: f.type, base64: f.base64 })) : undefined,
     timestamp: new Date().toISOString()
   });
