@@ -169,10 +169,11 @@ const els = {};
   "btn-sign-out","gps-modal","gps-modal-title","gps-modal-sub","gps-old-coords",
   "gps-new-coords","gps-accuracy","gps-cancel","gps-confirm",
   "menages-modal","menages-modal-title","menages-search","menages-statut-filter","menages-export","menages-list","menages-close",
-  "menage-detail-modal","menage-detail-title","menage-detail-tel","menage-statut",
+  "menage-detail-modal","menage-detail-title","menage-detail-tel","menage-statut","menage-statut-auto-hint",
   "menage-date-rdv","menage-heure-rdv","menage-equipe","menage-observations",
   "menage-photo-capture","menage-fichiers-input","menage-fichiers-preview","menage-cancel","menage-save"
-  ,"menage-cancel-rdv"
+  ,"menage-cancel-rdv",
+  "file-preview-modal","file-preview-title","file-preview-body","file-preview-close","file-preview-open-external"
 ].forEach(id => els[id] = document.getElementById(id));
 
 /* ============================================================
@@ -710,6 +711,7 @@ function openMenageDetail(idMenage) {
   els["menage-observations"].value = m.observations || "";
   els["menage-photo-capture"].value = "";
   els["menage-fichiers-input"].value = "";
+  els["menage-statut-auto-hint"].style.display = "none";
   renderMenageFichiersPreview();
   els["menages-modal"].classList.add("hidden");
   els["menage-detail-modal"].classList.remove("hidden");
@@ -783,21 +785,30 @@ async function addMenageFile(file) {
     return;
   }
   menageNewFiles.push(entry);
+  // Un fichier vient d'être ajouté à l'enquête : le statut passera automatiquement
+  // à "Enquête réalisée" à l'enregistrement (voir le bouton "menage-save"). On le
+  // reflète tout de suite dans le sélecteur pour que l'opérateur le voie, tout en
+  // le laissant libre de le changer ensuite si besoin (ex. RDV annulé malgré tout).
+  els["menage-statut"].value = "Enquête réalisée";
+  els["menage-statut-auto-hint"].style.display = "block";
   renderMenageFichiersPreview();
 }
 function removeMenageNewFile(id) {
   menageNewFiles = menageNewFiles.filter(f => f.id !== id);
+  if (menageNewFiles.length === 0) els["menage-statut-auto-hint"].style.display = "none";
   renderMenageFichiersPreview();
 }
 function renderMenageFichiersPreview() {
   const container = els["menage-fichiers-preview"];
   const existants = (menageTarget && menageTarget.fichiers) || [];
   const parts = [];
-  existants.forEach(f => {
+  existants.forEach((f, i) => {
+    const isImg = String(f.type || "").indexOf("image/") === 0;
+    const thumb = isImg ? `<img class="file-thumb" src="${f.url}">` : `<div class="file-icon">${fileIconFor(f.type)}</div>`;
     parts.push(`
-      <div class="file-chip">
-        <div class="file-icon">${fileIconFor(f.type)}</div>
-        <a class="file-name" href="${f.url}" target="_blank" rel="noopener">${f.nom || "Fichier"}</a>
+      <div class="file-chip" data-preview-existing="${i}">
+        ${thumb}
+        <span class="file-name">${f.nom || "Fichier"}</span>
         <span class="file-status">déjà envoyé</span>
       </div>`);
   });
@@ -806,7 +817,7 @@ function renderMenageFichiersPreview() {
       ? `<img class="file-thumb" src="${f.base64}">`
       : `<div class="file-icon">${fileIconFor(f.type)}</div>`;
     parts.push(`
-      <div class="file-chip pending">
+      <div class="file-chip pending" data-preview-pending="${f.id}">
         ${thumb}
         <span class="file-name">${f.nom}</span>
         <span class="file-status">à envoyer</span>
@@ -817,8 +828,56 @@ function renderMenageFichiersPreview() {
     parts.push(`<div class="empty-hint">${menageTarget._fichiersEnAttente} fichier(s) d'un envoi précédent déjà en file d'attente de synchronisation.</div>`);
   }
   container.innerHTML = parts.length ? parts.join("") : '<div class="empty-hint">Aucun fichier pour ce ménage.</div>';
-  container.querySelectorAll("[data-remove-file]").forEach(btn => btn.onclick = () => removeMenageNewFile(btn.dataset.removeFile));
+  container.querySelectorAll("[data-remove-file]").forEach(btn => btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    removeMenageNewFile(btn.dataset.removeFile);
+  }));
+  container.querySelectorAll("[data-preview-existing]").forEach(chip => chip.addEventListener("click", () => {
+    const f = existants[Number(chip.dataset.previewExisting)];
+    if (f) openFilePreview(f);
+  }));
+  container.querySelectorAll("[data-preview-pending]").forEach(chip => chip.addEventListener("click", () => {
+    const f = menageNewFiles.find(x => x.id === chip.dataset.previewPending);
+    if (f) openFilePreview(f);
+  }));
 }
+
+/* ------------------------------------------------------------
+   Consultation d'un fichier (photo ou PDF) directement dans l'app,
+   sans dépendre d'un onglet externe — utilisé pour relire une fiche
+   déjà renseignée (fichiers déjà envoyés) comme pour vérifier un
+   fichier qu'on vient de sélectionner (pas encore envoyé).
+   ------------------------------------------------------------ */
+// Transforme un lien de partage Drive ("/view?...") en lien intégrable
+// ("/preview"), utilisable dans un <iframe> pour afficher un PDF sans quitter
+// l'app. Si le format n'est pas reconnu, renvoie l'URL telle quelle.
+function driveEmbedUrl(url) {
+  const match = /\/file\/d\/([^/]+)\//.exec(url || "");
+  return match ? `https://drive.google.com/file/d/${match[1]}/preview` : url;
+}
+function openFilePreview(file) {
+  const isImg = String(file.type || "").indexOf("image/") === 0;
+  const isPdf = file.type === "application/pdf";
+  const src = file.url || file.base64;
+  els["file-preview-title"].textContent = file.nom || "Fichier";
+  const body = els["file-preview-body"];
+  if (isImg && src) {
+    body.innerHTML = `<img src="${src}" alt="${file.nom || ""}">`;
+  } else if (isPdf && src) {
+    const embedSrc = file.url ? driveEmbedUrl(file.url) : src; // fichier local (base64) : affiché tel quel
+    body.innerHTML = `<iframe src="${embedSrc}" title="${file.nom || "Document PDF"}"></iframe>`;
+  } else {
+    body.innerHTML = `<div class="no-preview">Aperçu indisponible pour ce fichier.</div>`;
+  }
+  const openLink = els["file-preview-open-external"];
+  if (file.url) { openLink.href = file.url; openLink.style.display = "block"; }
+  else { openLink.style.display = "none"; } // fichier pas encore envoyé : pas de lien Drive
+  els["file-preview-modal"].classList.remove("hidden");
+}
+els["file-preview-close"].addEventListener("click", () => {
+  els["file-preview-modal"].classList.add("hidden");
+  els["file-preview-body"].innerHTML = ""; // libère la mémoire (notamment pour les grandes images)
+});
 els["menage-photo-capture"].addEventListener("change", async () => {
   const file = els["menage-photo-capture"].files[0];
   els["menage-photo-capture"].value = "";
@@ -831,9 +890,13 @@ els["menage-fichiers-input"].addEventListener("change", async () => {
 });
 els["menage-save"].addEventListener("click", async () => {
   if (!menageTarget) return;
+  // Si des fichiers ont été ajoutés lors de cette édition, l'enquête est
+  // considérée réalisée : le statut est forcé à "Enquête réalisée" à
+  // l'enregistrement, même si l'opérateur avait sélectionné autre chose.
+  const statutFinal = menageNewFiles.length > 0 ? "Enquête réalisée" : els["menage-statut"].value;
   await idbAddPending({
     kind: "menage", cle: state.currentMenageCle, id_menage: menageTarget.id_menage, _row: menageTarget._row,
-    statut: els["menage-statut"].value,
+    statut: statutFinal,
     date_rdv: els["menage-date-rdv"].value,
     heure_rdv: els["menage-heure-rdv"].value,
     equipe: els["menage-equipe"].value.trim(),
