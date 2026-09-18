@@ -735,6 +735,19 @@ els["menage-cancel-rdv"].addEventListener("click", () => {
   els["menage-date-rdv"].value = "";
   els["menage-heure-rdv"].value = "";
 });
+// Un ménage remis à "Non traité" retourne dans le bac commun, visible et
+// disponible pour n'importe quel opérateur (voir currentFilteredMenages()) :
+// le rendez-vous et l'équipe assignée n'ont donc plus lieu d'être. On les
+// efface tout de suite à l'écran par cohérence — le serveur les efface de
+// toute façon lui-même à l'enregistrement (voir updateMenage() côté Code.gs),
+// donc ce n'est qu'un reflet immédiat pour l'opérateur, pas une garantie.
+els["menage-statut"].addEventListener("change", () => {
+  if (els["menage-statut"].value === "Non traité") {
+    els["menage-date-rdv"].value = "";
+    els["menage-heure-rdv"].value = "";
+    els["menage-equipe"].value = "";
+  }
+});
 
 function readAndCompressImage(file, maxWidth = 1280, quality = 0.65) {
   return new Promise((resolve, reject) => {
