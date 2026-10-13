@@ -281,12 +281,12 @@
       "departement": "ATTIEGOUAKRO",
       "sous_prefecture": "LOLOBO",
       "nb_menages": 335,
-      "lat": 7.059358,
-      "lng": -5.193733,
-      "distance_km": 28.0,
+      "lat": 7.055822220378547,
+      "lng": -5.253119900752772,
+      "distance_km": 25.97,
       "statut_coordonnees": "Vérifiée",
-      "source": "Aucune fiche géolocalisée trouvée dans les sources consultées cette session — à compléter",
-      "maj_terrain": null
+      "source": "GPS terrain (operateur PWA)",
+      "maj_terrain": "2026-10-13"
     },
     {
       "cle": "ATTIEGOUAKRO|LOLOBO|N'DEBO",
@@ -379,12 +379,12 @@
       "departement": "ATTIEGOUAKRO",
       "sous_prefecture": "LOLOBO",
       "nb_menages": 201,
-      "lat": 6.967,
-      "lng": -5.267,
-      "distance_km": 15.97,
+      "lat": 6.958237505050787,
+      "lng": -5.265951588680496,
+      "distance_km": 15.02,
       "statut_coordonnees": "Vérifiée",
-      "source": "Wikipedia (chef-lieu de la sous-préfecture de Lolobo)",
-      "maj_terrain": null
+      "source": "GPS terrain terrain (opérateur PWA) — chef-lieu sous-préfecture Lolobo",
+      "maj_terrain": "2026-10-13"
     },
     {
       "cle": "ATTIEGOUAKRO|LOLOBO|KORIAKRO",
