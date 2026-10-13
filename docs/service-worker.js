@@ -1,4 +1,4 @@
-const CACHE_VERSION = "rsu-itineraires-v4";
+const CACHE_VERSION = "rsu-itineraires-v5";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const DATA_CACHE = `${CACHE_VERSION}-data`;
 
@@ -18,7 +18,11 @@ const SHELL_FILES = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL_FILES))
+      // Un fichier manquant (ex. icône absente) ne doit pas faire échouer toute l'installation :
+      // chaque ressource est mise en cache individuellement, les échecs sont seulement journalisés.
+      .then((cache) => Promise.all(SHELL_FILES.map((f) =>
+        cache.add(f).catch((e) => console.warn("SW: non mis en cache", f, e && e.message))
+      )))
       .then(() => self.skipWaiting())
   );
 });
@@ -36,10 +40,12 @@ self.addEventListener("activate", (event) => {
 });
 
 function isCoordDataRequest(url) {
-  // Référentiel des localités uniquement (JSON statique GitHub, ou liste vivante
-  // Apps Script ?action=list) — jamais de données de ménages ici.
-  return url.includes("raw.githubusercontent.com") ||
-         (url.includes("script.google.com") && url.includes("action=list"));
+  // Référentiel statique des localités (JSON GitHub) uniquement — jamais de données de ménages.
+  // La liste vivante Apps Script (?action=list) n'est PLUS mise en cache ici : son URL contient le
+  // jeton d'identité de l'opérateur (id_token) et un horodatage (t=), donc chaque requête créait une
+  // entrée de cache inutilisable hors-ligne et conservait des jetons. Le repli hors-ligne du
+  // référentiel est assuré par IndexedDB (app.js : idbSetMeta/idbGetMeta "localites").
+  return url.includes("raw.githubusercontent.com");
 }
 
 self.addEventListener("fetch", (event) => {
@@ -55,8 +61,10 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const clone = res.clone();
-          caches.open(DATA_CACHE).then((cache) => cache.put(req, clone));
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(DATA_CACHE).then((cache) => cache.put(req, clone));
+          }
           return res;
         })
         .catch(() => caches.match(req))
@@ -84,12 +92,19 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // App shell : cache d'abord, résilient hors-ligne.
+  // App shell : cache d'abord (rapide, résilient hors-ligne), avec revalidation en arrière-plan
+  // pour que les correctifs de app.js / config.js / style.css arrivent sans attendre un changement
+  // de version du cache. Seules les réponses valides sont mises en cache.
   event.respondWith(
-    caches.match(req).then((cached) => cached || fetch(req).then((res) => {
-      const clone = res.clone();
-      caches.open(SHELL_CACHE).then((cache) => cache.put(req, clone));
-      return res;
-    }).catch(() => cached))
+    caches.match(req).then((cached) => {
+      const network = fetch(req).then((res) => {
+        if (res && res.ok) {
+          const clone = res.clone();
+          caches.open(SHELL_CACHE).then((cache) => cache.put(req, clone));
+        }
+        return res;
+      }).catch(() => cached);
+      return cached || network;
+    })
   );
 });

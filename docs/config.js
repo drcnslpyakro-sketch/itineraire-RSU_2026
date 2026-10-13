@@ -18,6 +18,17 @@ window.APP_CONFIG = {
   // Point central du district (utilisé pour le calcul des distances et le cadrage initial)
   CENTRE: { nom: "Yamoussoukro", lat: 6.824351068, lng: -5.284168113 },
 
+  // Emprise approximative du District de Yamoussoukro : toute position GPS hors de ce cadre est refusée.
+  // Doit rester identique à BBOX_DISTRICT dans le script Apps Script (Code.gs).
+  BBOX: { latMin: 5.5, latMax: 8.0, lngMin: -6.0, lngMax: -4.5 },
+
+  // Contrôles à l'enregistrement d'une position GPS
+  GPS_MAX_ACCURACY_M: 100,   // au-delà : confirmation demandée (précision trop faible)
+  GPS_MIN_DISTANCE_M: 50,    // à moins de : confirmation demandée (position copiée sur une autre localité ?)
+
+  // Google Maps accepte au plus 10 points (arrivée + 9 étapes intermédiaires) par lien
+  GMAPS_MAX_STOPS: 10,
+
   // Fréquence de nouvelle tentative de synchronisation automatique (ms)
   SYNC_RETRY_MS: 30000,
 

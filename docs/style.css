@@ -98,6 +98,8 @@ button:disabled{opacity:0.45; cursor:default;}
 }
 .badge.verifiee{background:rgba(63,107,69,0.15); color:var(--savanna-deep);}
 .badge.attente{background:rgba(181,121,31,0.16); color:var(--amber);}
+.popup-warning{font-size:0.76rem; color:var(--danger); background:rgba(162,59,43,0.08); border-left:3px solid var(--danger);
+  padding:5px 8px; margin:0 0 8px; border-radius:0 6px 6px 0; line-height:1.4;}
 .no-results{padding:16px; font-size:0.85rem; color:var(--ink-soft); font-style:italic;}
 
 /* ---- carte ---- */

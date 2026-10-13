@@ -144,6 +144,53 @@ function updateAccountCard() {
    2. État applicatif
    ============================================================ */
 const CFG = window.APP_CONFIG;
+const BBOX = CFG.BBOX || { latMin: 5.5, latMax: 8.0, lngMin: -6.0, lngMax: -4.5 };
+const GPS_MAX_ACCURACY_M = CFG.GPS_MAX_ACCURACY_M || 100;
+const GPS_MIN_DISTANCE_M = CFG.GPS_MIN_DISTANCE_M || 50;
+const GMAPS_MAX_STOPS = CFG.GMAPS_MAX_STOPS || 10;
+
+/* ---- Utilitaires de normalisation et de statut des positions ---- */
+// Recherche tolérante : sans accents, apostrophes/tirets/espaces unifiés, minuscules.
+function normText(s) {
+  return String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u2018\u2019\u02BC`\u00B4]/g, "'").replace(/[^a-zA-Z0-9]+/g, " ").trim().toLowerCase();
+}
+// Même règle que le serveur (canonNom) : apostrophes droites, espaces réduits, majuscules.
+function canonNom(s) {
+  return String(s ?? "").replace(/[\u2018\u2019\u02BC`\u00B4]/g, "'").replace(/\s+/g, " ").trim().toUpperCase();
+}
+function round6(v) { return Math.round(v * 1e6) / 1e6; }
+function inBBox(lat, lng) { return lat >= BBOX.latMin && lat <= BBOX.latMax && lng >= BBOX.lngMin && lng <= BBOX.lngMax; }
+// Niveau de fiabilité de la position, lu dans statut_coordonnees (nouveau vocabulaire ET anciennes valeurs).
+function coordLevel(loc) {
+  const st = normText(loc.statut_coordonnees);
+  if (st.startsWith("verifiee terrain")) return "terrain";
+  if (st.startsWith("verifiee reference")) return "reference";
+  if (st === "verifiee" || st.startsWith("verifiee ")) return "reference"; // ancienne valeur « Vérifiée »
+  if (st.startsWith("approximative")) return "approx";
+  if (st.startsWith("a confirmer")) return "confirmer";
+  if (st.startsWith("anomalie")) return "anomalie";
+  return "none";
+}
+function isReliable(level) { return level === "terrain" || level === "reference"; }
+const LEVEL_BADGE = { terrain: "relevée sur le terrain", reference: "référence externe", approx: "approximative", confirmer: "à confirmer", anomalie: "anomalie", none: "sans position" };
+// « Quartier (confirmé) » → « Quartier » ; seule la réserve « probable » est conservée.
+function typeLabel(t) {
+  const m = /^(Village|Quartier)(?:\s*\((confirmé|probable)\))?\s*$/i.exec(String(t || ""));
+  if (!m) return String(t || "");
+  return m[1] + (m[2] && m[2].toLowerCase() === "probable" ? " (probable)" : "");
+}
+function cleanNote(loc) { return String(loc.note || "").replace(/^\[auto\]\s*/, ""); }
+// Voisin le plus proche (autre que `cle`) : sert à détecter une position copiée sur une autre localité.
+function nearestOther(lat, lng, cle) {
+  let best = null;
+  state.localites.forEach(l => {
+    if (l.cle === cle || l.masquee || l.lat == null || l.lng == null) return;
+    const m = haversineKm(lat, lng, l.lat, l.lng) * 1000;
+    if (!best || m < best.m) best = { m, nom: l.nom };
+  });
+  return best;
+}
 const MENAGES_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 heures
 const MENAGES_CACHE_STORAGE_KEY = "menagesCacheV1";
 const state = {
@@ -231,7 +278,9 @@ function applyPendingOverrides(list, pending) {
   list.forEach(l => byCle[l.cle] = { ...l });
   pending.filter(p => p.kind === "coord").forEach(p => {
     if (byCle[p.cle]) {
-      byCle[p.cle].lat = p.lat; byCle[p.cle].lng = p.lng;
+      byCle[p.cle].lat = round6(p.lat); byCle[p.cle].lng = round6(p.lng);
+      byCle[p.cle].distance_km = Math.round(haversineKm(CFG.CENTRE.lat, CFG.CENTRE.lng, p.lat, p.lng) * 10) / 10;
+      byCle[p.cle].origine_coordonnees = "gps_terrain";
       byCle[p.cle].statut_coordonnees = "Vérifiée (terrain — en attente d'envoi)";
     }
   });
@@ -256,6 +305,7 @@ function initMap() {
     .bindPopup(`<div class="popup-title">${CFG.CENTRE.nom}</div><div class="popup-meta">Point de départ</div>`)
     .bindTooltip(CFG.CENTRE.nom, { permanent: true, direction: "top", offset: [0,-14], className: "marker-label" });
 }
+function distanceFromCentre(loc) { return haversineKm(CFG.CENTRE.lat, CFG.CENTRE.lng, loc.lat, loc.lng); }
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371, dLat = (lat2-lat1)*Math.PI/180, dLng = (lng2-lng1)*Math.PI/180;
   const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
@@ -267,7 +317,7 @@ function renderMarkers() {
   state.localites.forEach(loc => {
     if (loc.masquee) return;
     if (loc.lat == null || loc.lng == null) return;
-    const verifiee = (loc.statut_coordonnees || "").toLowerCase().includes("vérifiée");
+    const verifiee = isReliable(coordLevel(loc));
     if (!verifiee && !state.showUnverified) return;
     if (!applySousPrefectureFilter(loc)) return;
     const cls = verifiee ? "verifiee" : "attente";
@@ -280,11 +330,17 @@ function renderMarkers() {
   });
 }
 function buildPopupHtml(loc) {
-  const dist = loc.distance_km != null ? `${escapeHtml(loc.distance_km)} km du centre` : "distance inconnue";
+  // Distance recalculée à partir de la position affichée : jamais périmée. C'est une distance à vol d'oiseau.
+  const level = coordLevel(loc);
+  const dist = (loc.lat != null && loc.lng != null)
+    ? `${distanceFromCentre(loc).toFixed(1)} km du centre (à vol d'oiseau${level === "approx" ? ", non fiable" : ""})`
+    : "distance inconnue";
   const statut = escapeHtml(loc.statut_coordonnees || "Statut inconnu");
+  const alerte = (loc.a_verifier && cleanNote(loc)) ? `<div class="popup-warning">⚠ ${escapeHtml(cleanNote(loc))}</div>` : "";
   return `
     <div class="popup-title">${escapeHtml(loc.nom)}</div>
-    <div class="popup-meta">${escapeHtml(loc.type || "")} · ${escapeHtml(loc.sous_prefecture || "")}<br>${dist} · ${escapeHtml(loc.nb_menages || 0)} ménages<br><em>${statut}</em></div>
+    <div class="popup-meta">${escapeHtml(typeLabel(loc.type))} · ${escapeHtml(loc.sous_prefecture || "")}<br>${dist} · ${escapeHtml(loc.nb_menages || 0)} ménages<br><em>${statut}</em></div>
+    ${alerte}
     <div class="popup-actions">
       <button class="secondary" data-action="add-itin" data-cle="${escapeHtml(loc.cle)}">Ajouter à l'itinéraire</button>
       <button class="secondary" data-action="menages" data-cle="${escapeHtml(loc.cle)}">Voir les ménages</button>
@@ -341,10 +397,13 @@ function renderSearchResults(items) {
     return;
   }
   els["search-results"].innerHTML = items.slice(0, 30).map(loc => {
-    const verifiee = (loc.statut_coordonnees || "").toLowerCase().includes("vérifiée");
-    const badge = loc.lat != null
-      ? `<span class="badge ${verifiee ? "verifiee" : "attente"}">${verifiee ? "vérifiée" : "à confirmer"}</span>`
-      : `<span class="badge attente">sans position</span>`;
+    const level = coordLevel(loc);
+    let label;
+    if (normText(loc.statut_coordonnees).startsWith("non localisable")) label = "non localisable";
+    else if (level === "anomalie") label = LEVEL_BADGE.anomalie;
+    else if (loc.lat == null || loc.lng == null) label = LEVEL_BADGE.none;
+    else label = LEVEL_BADGE[level === "none" ? "confirmer" : level];
+    const badge = `<span class="badge ${loc.lat != null && isReliable(level) ? "verifiee" : "attente"}">${label}</span>`;
     return `<div class="result-item" data-cle="${escapeHtml(loc.cle)}"><span class="result-name">${escapeHtml(loc.nom)}</span><span class="result-meta">${escapeHtml(loc.sous_prefecture || "")} ${badge}</span></div>`;
   }).join("");
   els["search-results"].classList.add("open");
@@ -359,15 +418,35 @@ function selectFromSearch(cle) {
     state.map.flyTo([loc.lat, loc.lng], 13, { duration: 0.8 });
     const marker = state.markersByCle[cle];
     if (marker) marker.openPopup();
+  } else if (confirm(`« ${loc.nom} » n'a pas de position connue.\n\nOK : voir ses ménages.\nAnnuler : relever sa position GPS (une fois sur place).`)) {
+    openMenagesModal(cle);
   } else {
-    alert(`« ${loc.nom} » n'a pas encore de position connue. Utilisez « Actualiser la position » une fois sur place.`);
     openGpsModal(cle);
   }
 }
+// Recherche insensible aux accents, apostrophes (’ ou '), tirets, espaces : « nzuessy » trouve N'ZUESSY.
+function matchLocalites(q) {
+  const nq = normText(q), cq = nq.replace(/ /g, "");
+  if (!nq) return [];
+  return state.localites
+    .filter(l => !l.masquee && applySousPrefectureFilter(l))
+    .map(l => {
+      const n = normText(l.nom), c = n.replace(/ /g, ""), sp = normText(l.sous_prefecture);
+      let score = -1;
+      if (n === nq || c === cq) score = 0;
+      else if (n.startsWith(nq) || c.startsWith(cq)) score = 1;
+      else if (n.includes(nq) || c.includes(cq)) score = 2;
+      else if (sp.includes(nq)) score = 3;
+      return { l, score };
+    })
+    .filter(x => x.score >= 0)
+    .sort((a, b) => a.score - b.score || (b.l.nb_menages || 0) - (a.l.nb_menages || 0))
+    .map(x => x.l);
+}
 els["search-input"].addEventListener("input", () => {
-  const q = els["search-input"].value.trim().toLowerCase();
+  const q = els["search-input"].value.trim();
   if (q === "") { els["search-results"].classList.remove("open"); return; }
-  renderSearchResults(state.localites.filter(l => !l.masquee && applySousPrefectureFilter(l) && ((l.nom||"").toLowerCase().includes(q) || (l.sous_prefecture||"").toLowerCase().includes(q))));
+  renderSearchResults(matchLocalites(q));
 });
 els["search-input"].addEventListener("focus", () => { if (els["search-input"].value.trim() !== "") els["search-results"].classList.add("open"); });
 document.addEventListener("click", (e) => { if (!document.getElementById("toolbar").contains(e.target)) els["search-results"].classList.remove("open"); });
@@ -431,7 +510,7 @@ function renderItinerary() {
   list.innerHTML = state.itinerary.map((cle, i) => {
     const loc = state.localites.find(l => l.cle === cle);
     if (!loc) return "";
-    return `<div class="list-row"><div><div class="name">${i+1}. ${loc.nom}</div><div class="sub">${loc.sous_prefecture || ""}</div></div><button class="ghost" data-remove="${cle}" style="padding:6px 10px;">Retirer</button></div>`;
+    return `<div class="list-row"><div><div class="name">${i+1}. ${escapeHtml(loc.nom)}</div><div class="sub">${escapeHtml(loc.sous_prefecture || "")}</div></div><button class="ghost" data-remove="${escapeHtml(cle)}" style="padding:6px 10px;">Retirer</button></div>`;
   }).join("");
   list.querySelectorAll("[data-remove]").forEach(btn => btn.onclick = () => removeFromItinerary(btn.dataset.remove));
 }
@@ -472,8 +551,12 @@ async function computeRoute() {
 }
 els["btn-recalc-route"].addEventListener("click", computeRoute);
 function openInGoogleMaps() {
-  const stops = state.itinerary.map(cle => state.localites.find(l => l.cle === cle)).filter(l => l && l.lat != null && l.lng != null);
+  let stops = state.itinerary.map(cle => state.localites.find(l => l.cle === cle)).filter(l => l && l.lat != null && l.lng != null);
   if (stops.length === 0) return;
+  if (stops.length > GMAPS_MAX_STOPS) {
+    alert(`Google Maps accepte au plus ${GMAPS_MAX_STOPS - 1} étapes intermédiaires : seules les ${GMAPS_MAX_STOPS} premières étapes sont transmises.`);
+    stops = stops.slice(0, GMAPS_MAX_STOPS);
+  }
   const origin = `${CFG.CENTRE.lat},${CFG.CENTRE.lng}`;
   const destination = `${stops[stops.length - 1].lat},${stops[stops.length - 1].lng}`;
   const waypoints = stops.slice(0, -1).map(s => `${s.lat},${s.lng}`).join("|");
@@ -484,7 +567,7 @@ function openInGoogleMaps() {
 els["btn-open-gmaps"].addEventListener("click", openInGoogleMaps);
 els["btn-toggle-unverified"].addEventListener("click", () => {
   state.showUnverified = !state.showUnverified;
-  els["btn-toggle-unverified"].textContent = state.showUnverified ? "Sans position : afficher" : "Sans position : masquer";
+  els["btn-toggle-unverified"].textContent = state.showUnverified ? "Positions à confirmer : affichées" : "Positions à confirmer : masquées";
   refreshToolbarIndicator();
   renderMarkers();
 });
@@ -518,9 +601,16 @@ function openGpsModal(cle) {
 els["gps-cancel"].addEventListener("click", () => els["gps-modal"].classList.add("hidden"));
 els["gps-confirm"].addEventListener("click", async () => {
   if (!gpsTarget || !gpsCaptured) return;
+  const lat = round6(gpsCaptured.lat), lng = round6(gpsCaptured.lng);
+  if (!inBBox(lat, lng)) { alert("Cette position est hors du District de Yamoussoukro : vérifiez le GPS de l'appareil avant de réessayer."); return; }
+  const acc = Math.round(gpsCaptured.accuracy);
+  if (acc > GPS_MAX_ACCURACY_M && !confirm(`Précision faible (± ${acc} m). Enregistrer quand même cette position ?`)) return;
+  const voisin = nearestOther(lat, lng, gpsTarget.cle);
+  if (voisin && voisin.m < GPS_MIN_DISTANCE_M &&
+      !confirm(`Cette position est à ${Math.round(voisin.m)} m de « ${voisin.nom} ». Êtes-vous bien à ${gpsTarget.nom} ? Enregistrer quand même ?`)) return;
   await idbAddPending({
     kind: "coord", cle: gpsTarget.cle, nom: gpsTarget.nom,
-    lat: gpsCaptured.lat, lng: gpsCaptured.lng, accuracy: gpsCaptured.accuracy,
+    lat, lng, accuracy: gpsCaptured.accuracy,
     timestamp: new Date().toISOString()
   });
   els["gps-modal"].classList.add("hidden");
@@ -534,13 +624,13 @@ els["gps-confirm"].addEventListener("click", async () => {
    8. Gestion partagée des localités
    ============================================================ */
 function localiteKey(departement, sousPrefecture, nom) {
-  return [departement, sousPrefecture, nom].map(value => String(value || "").trim().toUpperCase()).join("|");
+  return [departement, sousPrefecture, nom].map(canonNom).join("|");
 }
 function refreshLocaliteOptions() {
   const departments = [...new Set(state.localites.map(l => l.departement).filter(Boolean))].sort();
   const sousPrefectures = [...new Set(state.localites.map(l => l.sous_prefecture).filter(Boolean))].sort();
-  els["add-localite-departement-options"].innerHTML = departments.map(value => `<option value="${value}"></option>`).join("");
-  els["add-localite-sous-prefecture-options"].innerHTML = sousPrefectures.map(value => `<option value="${value}"></option>`).join("");
+  els["add-localite-departement-options"].innerHTML = departments.map(value => `<option value="${escapeHtml(value)}"></option>`).join("");
+  els["add-localite-sous-prefecture-options"].innerHTML = sousPrefectures.map(value => `<option value="${escapeHtml(value)}"></option>`).join("");
 }
 function openAddLocaliteModal() {
   refreshLocaliteOptions();
@@ -569,12 +659,17 @@ els["add-localite-save"].addEventListener("click", async () => {
   const sousPrefecture = els["add-localite-sous-prefecture"].value.trim();
   if (!nom || !departement || !sousPrefecture) { alert("Le nom, le département et la sous-préfecture sont requis."); return; }
   const cle = localiteKey(departement, sousPrefecture, nom);
-  if (state.localites.some(l => l.cle === cle)) { alert("Cette localité existe déjà dans le référentiel."); return; }
+  // Doublon : comparaison sans accents ni apostrophes (N’DEBO = N'DEBO = ndebo).
+  const cleCmp = normText(cle);
+  if (state.localites.some(l => l.cle === cle || normText(l.cle) === cleCmp)) { alert("Cette localité existe déjà dans le référentiel."); return; }
+  if (addLocaliteGps && !inBBox(addLocaliteGps.lat, addLocaliteGps.lng)) { alert("La position captée est hors du District de Yamoussoukro : vérifiez le GPS."); return; }
   const localite = {
-    cle, nom, type: els["add-localite-type"].value, departement: departement.toUpperCase(),
-    sous_prefecture: sousPrefecture.toUpperCase(), nb_menages: 0,
-    lat: addLocaliteGps ? addLocaliteGps.lat : null, lng: addLocaliteGps ? addLocaliteGps.lng : null,
+    cle, nom: canonNom(nom), type: els["add-localite-type"].value, departement: canonNom(departement),
+    sous_prefecture: canonNom(sousPrefecture), nb_menages: 0,
+    lat: addLocaliteGps ? round6(addLocaliteGps.lat) : null, lng: addLocaliteGps ? round6(addLocaliteGps.lng) : null,
+    distance_km: addLocaliteGps ? Math.round(haversineKm(CFG.CENTRE.lat, CFG.CENTRE.lng, addLocaliteGps.lat, addLocaliteGps.lng) * 10) / 10 : null,
     statut_coordonnees: addLocaliteGps ? "Vérifiée (terrain)" : "Position non vérifiée",
+    origine_coordonnees: addLocaliteGps ? "gps_terrain" : null, a_verifier: false, note: null,
     source: "Ajout manuel (PWA)", masquee: false
   };
   await idbAddPending({ kind: "localite_add", localite, timestamp: new Date().toISOString(), accuracy: addLocaliteGps && addLocaliteGps.accuracy });
@@ -593,7 +688,7 @@ async function hideLocalite(cle, masquee = true) {
 function renderHiddenLocalites() {
   const hidden = state.localites.filter(loc => loc.masquee);
   els["hidden-localites-list"].innerHTML = hidden.length
-    ? hidden.map(loc => `<div class="list-row"><div><div class="name">${loc.nom}</div><div class="sub">${loc.sous_prefecture || ""} · ${loc.departement || ""}</div></div><button class="secondary" data-unhide="${loc.cle}">Réafficher</button></div>`).join("")
+    ? hidden.map(loc => `<div class="list-row"><div><div class="name">${escapeHtml(loc.nom)}</div><div class="sub">${escapeHtml(loc.sous_prefecture || "")} · ${escapeHtml(loc.departement || "")}</div></div><button class="secondary" data-unhide="${escapeHtml(loc.cle)}">Réafficher</button></div>`).join("")
     : '<div class="empty-hint">Aucune localité masquée.</div>';
   els["hidden-localites-list"].querySelectorAll("[data-unhide]").forEach(btn => btn.onclick = () => hideLocalite(btn.dataset.unhide, false));
 }
@@ -688,7 +783,7 @@ async function openMenagesModal(cle) {
     if (e.authRequired) flagAuthProblem(e.message);
     menages = state.menagesCache[cle]; // repli sur un cache périmé plutôt que rien, si hors-ligne
     if (!menages) {
-      els["menages-list"].innerHTML = `<div class="empty-hint">Liste indisponible hors-ligne pour cette localité (pas encore consultée en ligne). ${e.message || ""}</div>`;
+      els["menages-list"].innerHTML = `<div class="empty-hint">Liste indisponible hors-ligne pour cette localité (pas encore consultée en ligne). ${escapeHtml(e.message || "")}</div>`;
       return;
     }
   }
@@ -773,11 +868,11 @@ function renderMenagesList() {
   els["menages-list"].innerHTML = filtered.map(m => {
     const sansNumero = !telEstRenseigne(m.tel_chef_menage);
     return `
-    <div class="list-row" data-id="${m.id_menage}" style="cursor:pointer;">
-      <div><div class="name">${m.nom_chef_menage || "(nom non renseigné)"}</div>
-      <div class="sub">${sansNumero ? `<span class="badge attente">sans numéro</span>` : m.tel_chef_menage} · ${m.village_quartier || ""}${m._enAttente ? " · en attente d'envoi" : ""}</div>
-      <div class="sub" style="opacity:0.7;">${m.id_menage || ""}</div></div>
-      <span class="badge ${statutBadgeClass(m.statut)}">${m.statut || "Non traité"}</span>
+    <div class="list-row" data-id="${escapeHtml(m.id_menage)}" style="cursor:pointer;">
+      <div><div class="name">${escapeHtml(m.nom_chef_menage || "(nom non renseigné)")}</div>
+      <div class="sub">${sansNumero ? `<span class="badge attente">sans numéro</span>` : escapeHtml(m.tel_chef_menage)} · ${escapeHtml(m.village_quartier || "")}${m._enAttente ? " · en attente d'envoi" : ""}</div>
+      <div class="sub" style="opacity:0.7;">${escapeHtml(m.id_menage || "")}</div></div>
+      <span class="badge ${statutBadgeClass(m.statut)}">${escapeHtml(m.statut || "Non traité")}</span>
     </div>`;
   }).join("");
   els["menages-list"].querySelectorAll("[data-id]").forEach(row => row.addEventListener("click", () => openMenageDetail(row.dataset.id)));
@@ -1091,10 +1186,10 @@ function renderSyncList() {
   if (state.pending.length === 0) { els["sync-hint"].style.display = "block"; els["sync-list"].innerHTML = ""; return; }
   els["sync-hint"].style.display = "none";
   els["sync-list"].innerHTML = state.pending.map(p => {
-    if (p.kind === "menage") return `<div class="list-row"><div><div class="name">Ménage — ${p.statut || ""}</div><div class="sub">${p.fichiers && p.fichiers.length ? p.fichiers.length + " fichier(s) joint(s)" : "sans fichier"}</div></div><span class="badge attente">en attente</span></div>`;
-    if (p.kind === "localite_add") return `<div class="list-row"><div><div class="name">Nouvelle localité — ${p.localite.nom}</div><div class="sub">${p.localite.sous_prefecture || ""}</div></div><span class="badge attente">en attente</span></div>`;
-    if (p.kind === "localite_visibility") return `<div class="list-row"><div><div class="name">${p.masquee ? "Masquage" : "Réaffichage"} — ${p.nom}</div></div><span class="badge attente">en attente</span></div>`;
-    return `<div class="list-row"><div><div class="name">${p.nom}</div><div class="sub">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div></div><span class="badge attente">en attente</span></div>`;
+    if (p.kind === "menage") return `<div class="list-row"><div><div class="name">Ménage — ${escapeHtml(p.statut || "")}</div><div class="sub">${p.fichiers && p.fichiers.length ? p.fichiers.length + " fichier(s) joint(s)" : "sans fichier"}</div></div><span class="badge attente">en attente</span></div>`;
+    if (p.kind === "localite_add") return `<div class="list-row"><div><div class="name">Nouvelle localité — ${escapeHtml(p.localite.nom)}</div><div class="sub">${escapeHtml(p.localite.sous_prefecture || "")}</div></div><span class="badge attente">en attente</span></div>`;
+    if (p.kind === "localite_visibility") return `<div class="list-row"><div><div class="name">${p.masquee ? "Masquage" : "Réaffichage"} — ${escapeHtml(p.nom)}</div></div><span class="badge attente">en attente</span></div>`;
+    return `<div class="list-row"><div><div class="name">${escapeHtml(p.nom)}</div><div class="sub">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div></div><span class="badge attente">en attente</span></div>`;
   }).join("");
 }
 
