@@ -43,8 +43,16 @@
     <div class="row">
       <input type="text" id="search-input" placeholder="Rechercher une localité, un village, un quartier…" autocomplete="off" />
       <div id="search-results"></div>
+      <!-- Filtre sous-préfecture (toujours visible) -->
+      <select id="sous-prefecture-filter" title="Filtrer par sous-préfecture" style="min-width:180px; max-width:220px;">
+        <option value="">Toutes les sous-préfectures</option>
+      </select>
+      <!-- Visible uniquement sur téléphone / tablette : déplie ou replie les outils -->
+      <button type="button" class="secondary" id="btn-toolbar-toggle" aria-expanded="false" aria-controls="toolbar-tools" title="Afficher les outils">
+        <span class="tt-icon" aria-hidden="true">⚙</span><span class="tt-label">Outils</span><span class="tt-dot" id="toolbar-toggle-dot" hidden></span>
+      </button>
     </div>
-    <div class="row">
+    <div class="row" id="toolbar-tools">
       <button class="secondary" id="btn-toggle-unverified" title="Afficher/masquer les localités sans position connue">Sans position : afficher</button>
       <button class="secondary" id="btn-recalc-route">Recalculer l'itinéraire</button>
       <button class="secondary" id="btn-add-localite" title="Ajouter une nouvelle localité au référentiel">+ Localité</button>

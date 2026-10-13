@@ -379,11 +379,11 @@
       "departement": "ATTIEGOUAKRO",
       "sous_prefecture": "LOLOBO",
       "nb_menages": 201,
-      "lat": null,
-      "lng": null,
-      "distance_km": null,
-      "statut_coordonnees": "Anomalie - à vérifier",
-      "source": "Anomalie probable : LOLOBO est le nom de la ville/sous-préfecture du département d'Attiégouakro, distincte de la sous-préfecture de Yamoussoukro. Sa présence ici n'a pas pu être confirmée comme un lieu-dit distinct de la sous-préfecture de Yamoussoukro — à vérifier (possible erreur de saisie).",
+      "lat": 6.967,
+      "lng": -5.267,
+      "distance_km": 15.97,
+      "statut_coordonnees": "Vérifiée",
+      "source": "Wikipedia (chef-lieu de la sous-préfecture de Lolobo)",
       "maj_terrain": null
     },
     {
@@ -1392,7 +1392,8 @@
       "distance_km": null,
       "statut_coordonnees": "Anomalie - à vérifier",
       "source": "Anomalie probable : LOLOBO est le nom de la ville/sous-préfecture du département d'Attiégouakro, distincte de la sous-préfecture de Yamoussoukro. Sa présence ici n'a pas pu être confirmée comme un lieu-dit distinct de la sous-préfecture de Yamoussoukro — à vérifier (possible erreur de saisie).",
-      "maj_terrain": null
+      "maj_terrain": null,
+      "masquee": true
     },
     {
       "cle": "YAMOUSSOUKRO|YAMOUSSOUKRO|MAHOUNOU AKOUE",

@@ -225,6 +225,47 @@ label.file-btn input[type="file"]{display:none;}
 #file-preview-body iframe{width:100%; height:70vh; border:none; border-radius:8px; background:var(--white);}
 #file-preview-body .no-preview{padding:24px 8px; text-align:center; color:var(--ink-soft); font-size:0.88rem; font-style:italic;}
 
+/* ---- barre d'outils compacte : téléphones, tablettes, et téléphones en paysage ----
+   La recherche reste toujours visible ; les 4 actions se replient derrière « Outils »
+   et s'ouvrent en SUPERPOSITION sur la carte (la carte ne change donc jamais de taille). */
+#btn-toolbar-toggle{display:none;}
+/* Les panneaux internes de Leaflet (z-index 400–1000) passaient par-dessus les listes déroulantes
+   de la barre d'outils (recherche, menu Outils) : on isole la carte dans son propre contexte. */
+#map{position:relative; z-index:0;}
+@media (max-width: 1024px), (max-height: 560px) and (orientation: landscape){
+  #toolbar{padding:6px 10px; gap:0;}
+  #toolbar > .row:first-child{flex-wrap:nowrap; gap:6px;}
+  #toolbar > .row:first-child input{min-width:0; padding:9px 12px;}
+  #search-results{left:10px; right:10px; max-height:min(280px, 45dvh);}
+
+  #btn-toolbar-toggle{
+    display:inline-flex; align-items:center; gap:6px; flex-shrink:0; position:relative;
+    padding:9px 12px; min-height:40px;
+  }
+  #btn-toolbar-toggle .tt-icon{font-size:1rem; line-height:1;}
+  #btn-toolbar-toggle .tt-label::after{content:" ▾"; font-size:0.7rem;}
+  #toolbar.tools-open #btn-toolbar-toggle{background:var(--laterite); color:var(--white);}
+  #toolbar.tools-open #btn-toolbar-toggle .tt-label::after{content:" ▴";}
+  .tt-dot{
+    position:absolute; top:4px; right:4px; width:9px; height:9px; border-radius:50%;
+    background:var(--amber); border:2px solid var(--white);
+  }
+  .tt-dot[hidden]{display:none;}
+
+  #toolbar-tools{
+    display:none; position:absolute; left:10px; right:10px; top:calc(100% + 4px);
+    background:var(--white); border:1px solid var(--line); border-radius:10px;
+    box-shadow:var(--shadow); padding:10px; gap:8px; z-index:1001;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    max-height:calc(100dvh - 140px); overflow-y:auto;
+  }
+  #toolbar.tools-open #toolbar-tools{display:grid;}
+  #toolbar > #toolbar-tools > button{flex:none; width:100%; min-height:44px;}
+}
+@media (max-width: 340px){
+  #btn-toolbar-toggle .tt-label{display:none;}
+}
+
 @media (min-width: 760px){
   #bottom-panel{max-width:420px; position:fixed; right:16px; bottom:16px; top:auto;
     left:auto; border-radius:12px; border:1px solid var(--line); box-shadow:var(--shadow);}

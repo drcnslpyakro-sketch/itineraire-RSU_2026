@@ -149,7 +149,8 @@ const MENAGES_CACHE_STORAGE_KEY = "menagesCacheV1";
 const state = {
   localites: [], markersByCle: {}, pending: [], itinerary: [],
   showUnverified: true, map: null, routeLine: null,
-  currentMenageCle: null, menagesCache: {}, menagesCacheTs: {}
+  currentMenageCle: null, menagesCache: {}, menagesCacheTs: {},
+  sousPrefectureFilter: ""
 };
 loadMenagesCacheFromStorage();
 
@@ -174,7 +175,8 @@ const els = {};
   "menage-remuneration","menage-education","menage-sante","menage-logement","menage-alimentation","menage-choc",
   "menage-photo-capture","menage-fichiers-input","menage-fichiers-preview","menage-cancel","menage-save"
   ,"menage-cancel-rdv",
-  "file-preview-modal","file-preview-title","file-preview-body","file-preview-close","file-preview-open-external"
+  "file-preview-modal","file-preview-title","file-preview-body","file-preview-close","file-preview-open-external",
+  "sous-prefecture-filter"
 ].forEach(id => els[id] = document.getElementById(id));
 
 /* ============================================================
@@ -267,26 +269,27 @@ function renderMarkers() {
     if (loc.lat == null || loc.lng == null) return;
     const verifiee = (loc.statut_coordonnees || "").toLowerCase().includes("vérifiée");
     if (!verifiee && !state.showUnverified) return;
+    if (!applySousPrefectureFilter(loc)) return;
     const cls = verifiee ? "verifiee" : "attente";
     const icon = L.divIcon({ className: "", html: `<div class="pin ${cls}"></div>`, iconSize:[22,22], iconAnchor:[11,11] });
     const marker = L.marker([loc.lat, loc.lng], { icon }).addTo(state.map);
-    marker.bindTooltip(loc.nom, { permanent: false, direction: "top", offset: [0,-12], className: "marker-label" });
+    marker.bindTooltip(escapeHtml(loc.nom), { permanent: false, direction: "top", offset: [0,-12], className: "marker-label" });
     marker.bindPopup(buildPopupHtml(loc));
     marker.on("popupopen", () => bindPopupActions(loc));
     state.markersByCle[loc.cle] = marker;
   });
 }
 function buildPopupHtml(loc) {
-  const dist = loc.distance_km != null ? `${loc.distance_km} km du centre` : "distance inconnue";
-  const statut = loc.statut_coordonnees || "Statut inconnu";
+  const dist = loc.distance_km != null ? `${escapeHtml(loc.distance_km)} km du centre` : "distance inconnue";
+  const statut = escapeHtml(loc.statut_coordonnees || "Statut inconnu");
   return `
-    <div class="popup-title">${loc.nom}</div>
-    <div class="popup-meta">${loc.type || ""} · ${loc.sous_prefecture || ""}<br>${dist} · ${loc.nb_menages || 0} ménages<br><em>${statut}</em></div>
+    <div class="popup-title">${escapeHtml(loc.nom)}</div>
+    <div class="popup-meta">${escapeHtml(loc.type || "")} · ${escapeHtml(loc.sous_prefecture || "")}<br>${dist} · ${escapeHtml(loc.nb_menages || 0)} ménages<br><em>${statut}</em></div>
     <div class="popup-actions">
-      <button class="secondary" data-action="add-itin" data-cle="${loc.cle}">Ajouter à l'itinéraire</button>
-      <button class="secondary" data-action="menages" data-cle="${loc.cle}">Voir les ménages</button>
-      <button class="primary" data-action="update-gps" data-cle="${loc.cle}">Actualiser la position</button>
-      <button class="ghost" data-action="hide-localite" data-cle="${loc.cle}">Masquer</button>
+      <button class="secondary" data-action="add-itin" data-cle="${escapeHtml(loc.cle)}">Ajouter à l'itinéraire</button>
+      <button class="secondary" data-action="menages" data-cle="${escapeHtml(loc.cle)}">Voir les ménages</button>
+      <button class="primary" data-action="update-gps" data-cle="${escapeHtml(loc.cle)}">Actualiser la position</button>
+      <button class="ghost" data-action="hide-localite" data-cle="${escapeHtml(loc.cle)}">Masquer</button>
     </div>`;
 }
 function bindPopupActions(loc) {
@@ -297,8 +300,40 @@ function bindPopupActions(loc) {
 }
 
 /* ============================================================
+   Filtre sous-préfecture
+   ============================================================ */
+function populateSousPrefectureFilter() {
+  if (!els["sous-prefecture-filter"]) return;
+  const sousPrefectures = [...new Set(state.localites
+    .map(l => l.sous_prefecture)
+    .filter(Boolean)
+  )].sort();
+  const currentValue = els["sous-prefecture-filter"].value;
+  els["sous-prefecture-filter"].innerHTML = '<option value="">Toutes les sous-préfectures</option>' +
+    sousPrefectures.map(sp => `<option value="${escapeHtml(sp)}">${escapeHtml(sp)}</option>`).join("");
+  // Restore selection if still valid
+  if (sousPrefectures.includes(currentValue)) {
+    els["sous-prefecture-filter"].value = currentValue;
+  }
+}
+function applySousPrefectureFilter(loc) {
+  const filter = state.sousPrefectureFilter;
+  return !filter || (loc.sous_prefecture || "") === filter;
+}
+
+/* ============================================================
    5. Recherche de localités
    ============================================================ */
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
+
 function renderSearchResults(items) {
   if (items.length === 0) {
     els["search-results"].innerHTML = '<div class="no-results">Aucune localité trouvée</div>';
@@ -310,7 +345,7 @@ function renderSearchResults(items) {
     const badge = loc.lat != null
       ? `<span class="badge ${verifiee ? "verifiee" : "attente"}">${verifiee ? "vérifiée" : "à confirmer"}</span>`
       : `<span class="badge attente">sans position</span>`;
-    return `<div class="result-item" data-cle="${loc.cle}"><span class="result-name">${loc.nom}</span><span class="result-meta">${loc.sous_prefecture || ""} ${badge}</span></div>`;
+    return `<div class="result-item" data-cle="${escapeHtml(loc.cle)}"><span class="result-name">${escapeHtml(loc.nom)}</span><span class="result-meta">${escapeHtml(loc.sous_prefecture || "")} ${badge}</span></div>`;
   }).join("");
   els["search-results"].classList.add("open");
   els["search-results"].querySelectorAll(".result-item").forEach(el => el.addEventListener("click", () => selectFromSearch(el.dataset.cle)));
@@ -332,10 +367,57 @@ function selectFromSearch(cle) {
 els["search-input"].addEventListener("input", () => {
   const q = els["search-input"].value.trim().toLowerCase();
   if (q === "") { els["search-results"].classList.remove("open"); return; }
-  renderSearchResults(state.localites.filter(l => !l.masquee && ((l.nom||"").toLowerCase().includes(q) || (l.sous_prefecture||"").toLowerCase().includes(q))));
+  renderSearchResults(state.localites.filter(l => !l.masquee && applySousPrefectureFilter(l) && ((l.nom||"").toLowerCase().includes(q) || (l.sous_prefecture||"").toLowerCase().includes(q))));
 });
 els["search-input"].addEventListener("focus", () => { if (els["search-input"].value.trim() !== "") els["search-results"].classList.add("open"); });
 document.addEventListener("click", (e) => { if (!document.getElementById("toolbar").contains(e.target)) els["search-results"].classList.remove("open"); });
+
+/* ---- Barre d'outils rétractable (téléphone / tablette) ----
+   Sur petit écran, seule la recherche reste visible ; les 4 actions sont derrière le bouton
+   « Outils » et s'ouvrent en superposition sur la carte. Sur grand écran, rien ne change.
+   La requête doit rester identique à celle de style.css. */
+const compactMQ = window.matchMedia("(max-width: 1024px), (max-height: 560px) and (orientation: landscape)");
+const toolbarEl = document.getElementById("toolbar");
+const toolbarToggleBtn = document.getElementById("btn-toolbar-toggle");
+const SEARCH_PLACEHOLDER_FULL = els["search-input"].placeholder;
+function setToolsOpen(open) {
+  open = !!open && compactMQ.matches;
+  toolbarEl.classList.toggle("tools-open", open);
+  toolbarToggleBtn.setAttribute("aria-expanded", String(open));
+  toolbarToggleBtn.title = open ? "Masquer les outils" : "Afficher les outils";
+  if (open) els["search-results"].classList.remove("open");
+}
+// Pastille sur « Outils » quand un filtre est actif (localités sans position masquées) :
+// l'opérateur sait que la carte est filtrée même quand le menu est replié.
+function refreshToolbarIndicator() {
+  document.getElementById("toolbar-toggle-dot").hidden = state.showUnverified;
+}
+function applyCompactMode() {
+  els["search-input"].placeholder = compactMQ.matches ? "Rechercher une localité…" : SEARCH_PLACEHOLDER_FULL;
+  if (!compactMQ.matches) setToolsOpen(false);
+}
+toolbarToggleBtn.addEventListener("click", () => setToolsOpen(!toolbarEl.classList.contains("tools-open")));
+// Toute action choisie referme le menu (le résultat est visible sur la carte) ; le gestionnaire
+// propre à chaque bouton s'exécute d'abord, puis ce gestionnaire (phase de remontée).
+document.getElementById("toolbar-tools").addEventListener("click", (e) => { if (e.target.closest("button")) setToolsOpen(false); });
+// Appui en dehors de la barre (carte, en-tête…) : referme. Phase de capture, car Leaflet
+// peut arrêter la propagation des événements.
+document.addEventListener("pointerdown", (e) => { if (toolbarEl.classList.contains("tools-open") && !toolbarEl.contains(e.target)) setToolsOpen(false); }, true);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") setToolsOpen(false); });
+els["search-input"].addEventListener("focus", () => setToolsOpen(false));
+if (compactMQ.addEventListener) compactMQ.addEventListener("change", applyCompactMode); else compactMQ.addListener(applyCompactMode);
+applyCompactMode();
+refreshToolbarIndicator();
+
+// Filtre sous-préfecture
+if (els["sous-prefecture-filter"]) {
+  els["sous-prefecture-filter"].addEventListener("change", () => {
+    state.sousPrefectureFilter = els["sous-prefecture-filter"].value || "";
+    renderMarkers();
+    // Fermer les résultats de recherche si ouverts
+    els["search-results"].classList.remove("open");
+  });
+}
 
 /* ============================================================
    6. Itinéraire
@@ -403,6 +485,7 @@ els["btn-open-gmaps"].addEventListener("click", openInGoogleMaps);
 els["btn-toggle-unverified"].addEventListener("click", () => {
   state.showUnverified = !state.showUnverified;
   els["btn-toggle-unverified"].textContent = state.showUnverified ? "Sans position : afficher" : "Sans position : masquer";
+  refreshToolbarIndicator();
   renderMarkers();
 });
 
@@ -991,6 +1074,7 @@ async function refreshPendingAndData(refetchRemote) {
     try { const r = await loadLocalites(); base = r.list; } catch (e) { /* garde le cache */ }
   }
   state.localites = applyPendingOverrides(base || [], state.pending);
+  populateSousPrefectureFilter();
   renderMarkers();
   renderItinerary();
   if (state.currentMenageCle && !els["menages-modal"].classList.contains("hidden")) {
@@ -1170,6 +1254,7 @@ async function loadAppData() {
   } catch (e) {
     els["route-status"].textContent = "Impossible de charger le référentiel : " + e.message;
   }
+  populateSousPrefectureFilter();
   renderMarkers();
   renderItinerary();
   if (!els["hidden-localites-modal"].classList.contains("hidden")) renderHiddenLocalites();

@@ -1,4 +1,4 @@
-const CACHE_VERSION = "rsu-itineraires-v3";
+const CACHE_VERSION = "rsu-itineraires-v4";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const DATA_CACHE = `${CACHE_VERSION}-data`;
 
