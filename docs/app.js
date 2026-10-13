@@ -220,6 +220,7 @@ const els = {};
   "menage-detail-modal","menage-detail-title","menage-detail-tel","menage-statut","menage-statut-auto-hint",
   "menage-date-rdv","menage-heure-rdv","menage-equipe","menage-observations",
   "menage-remuneration","menage-education","menage-sante","menage-logement","menage-alimentation","menage-choc",
+  "menage-taille","menage-surnom","menage-nouveau-tel","menage-code-enquete","menage-code-denombrement","menages-fiche-export",
   "menage-photo-capture","menage-fichiers-input","menage-fichiers-preview","menage-cancel","menage-save"
   ,"menage-cancel-rdv",
   "file-preview-modal","file-preview-title","file-preview-body","file-preview-close","file-preview-open-external",
@@ -805,6 +806,10 @@ function applyMenagePendingOverrides(cle, menages) {
       if (o.logement !== undefined) m.logement = o.logement;
       if (o.alimentation !== undefined) m.alimentation = o.alimentation;
       if (o.choc !== undefined) m.choc = o.choc;
+      if (o.taille_menage !== undefined) m.taille_menage = o.taille_menage;
+      if (o.surnom_cm !== undefined) m.surnom_cm = o.surnom_cm;
+      if (o.nouveau_tel !== undefined) m.nouveau_tel = o.nouveau_tel;
+      if (o.code_enquete !== undefined) m.code_enquete = o.code_enquete;
       // Fichiers pas encore envoyés (pas de lien Drive tant que la synchronisation
       // n'a pas eu lieu) : on garde juste un compteur pour informer l'opérateur,
       // sans modifier m.lien_photo (qui ne contient que des fichiers réellement
@@ -900,6 +905,11 @@ function openMenageDetail(idMenage) {
   els["menage-logement"].value = m.logement || "";
   els["menage-alimentation"].value = m.alimentation || "";
   els["menage-choc"].value = m.choc || "";
+  els["menage-taille"].value = m.taille_menage || "";
+  els["menage-surnom"].value = m.surnom_cm || "";
+  els["menage-nouveau-tel"].value = m.nouveau_tel || "";
+  els["menage-code-enquete"].value = m.code_enquete || "";
+  renderCodeDenombrement(m);
   els["menage-photo-capture"].value = "";
   els["menage-fichiers-input"].value = "";
   els["menage-statut-auto-hint"].style.display = "none";
@@ -1092,12 +1102,73 @@ els["menage-fichiers-input"].addEventListener("change", async () => {
   els["menage-fichiers-input"].value = "";
   for (const file of files) await addMenageFile(file);
 });
+/* ---- Fiche de dénombrement : aperçu du code, contrôles, export ---- */
+// Doit rester identique à initialesAgent_() de Code.gs.
+const STATUTS_FICHE_REALISE = ["Enquête réalisée"];
+function initialesAgent(nom) {
+  let s = String(nom || "").trim();
+  if (s.indexOf("@") !== -1) s = s.split("@")[0];
+  const base = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/['\u2019\u2018`\u00B4]/g, "").toUpperCase();
+  const mots = base.split(/[^A-Z]+/).filter(Boolean);
+  if (!mots.length) return "";
+  if (mots.length === 1) return mots[0].substring(0, 2);
+  return mots.map(w => w.charAt(0)).join("");
+}
+// Le N° d'ordre et l'année sont attribués par le serveur à l'enregistrement
+// (jamais saisis). Si le ménage en a déjà un, on affiche son code définitif ;
+// sinon un aperçu avec les initiales de l'agent connecté.
+function renderCodeDenombrement(m) {
+  const el = els["menage-code-denombrement"];
+  const ini = m.initiales_agent || initialesAgent(auth.name || auth.email);
+  if (m.ordre_localite) {
+    const n = String(m.ordre_localite).padStart(3, "0");
+    el.textContent = `N° d'ordre ${m.ordre_localite} · Code dénombrement : RSU/${m.annee_enquete || new Date().getFullYear()}/${ini}/${n}`;
+  } else {
+    el.textContent = `Code dénombrement : RSU/${new Date().getFullYear()}/${ini}/··· — le N° d'ordre est attribué automatiquement dès que le statut n'est plus « Non traité ».`;
+  }
+}
+// Taille : entier de 1 à 99 ; renvoie "" si vide, null si invalide.
+function lireTailleMenage() {
+  const brut = els["menage-taille"].value.trim();
+  if (brut === "") return "";
+  const n = parseInt(brut, 10);
+  return (n >= 1 && n <= 99) ? n : null;
+}
+els["menages-fiche-export"].addEventListener("click", async () => {
+  const btn = els["menages-fiche-export"], label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Génération de la fiche…";
+  try {
+    if (state.pending.some(p => p.kind === "menage" && p.cle === state.currentMenageCle)) {
+      if (!confirm("Des modifications de ménages de cette localité n'ont pas encore été envoyées : elles ne figureront pas sur la fiche. Continuer quand même ?")) return;
+    }
+    const url = `${CFG.APPS_SCRIPT_URL}?action=export_fiche&cle=${encodeURIComponent(state.currentMenageCle)}&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
+    const res = await fetch(url);
+    const data = await parseJsonResponse(res);
+    if (data.auth_required) { flagAuthProblem(data.error); return; }
+    if (!data.ok) throw new Error(data.error || "Échec de l'export");
+    downloadXlsxToDevice(data);
+    if (data.incompletes) alert(`Fiche générée (${data.nb_lignes} ménage(s)). Attention : ${data.incompletes} ménage(s) réalisé(s) n'ont pas de taille de ménage ou de code d'enquête. Complétez-les dans leur fiche puis régénérez.`);
+  } catch (e) {
+    alert("Fiche impossible : " + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+});
 els["menage-save"].addEventListener("click", async () => {
   if (!menageTarget) return;
+  const taille = lireTailleMenage();
+  if (taille === null) { alert("La taille du ménage doit être un nombre entier entre 1 et 99."); els["menage-taille"].focus(); return; }
   // Si des fichiers ont été ajoutés lors de cette édition, l'enquête est
   // considérée réalisée : le statut est forcé à "Enquête réalisée" à
   // l'enregistrement, même si l'opérateur avait sélectionné autre chose.
   const statutFinal = menageNewFiles.length > 0 ? "Enquête réalisée" : els["menage-statut"].value;
+  // Fiche de dénombrement : un ménage « réalisé » devrait avoir sa taille et son code d'enquête.
+  if (STATUTS_FICHE_REALISE.includes(statutFinal)) {
+    const manque = [];
+    if (taille === "") manque.push("la taille du ménage");
+    if (!els["menage-code-enquete"].value.trim()) manque.push("le code de l'enquête");
+    if (manque.length && !confirm(`Il manque ${manque.join(" et ")} pour la fiche de dénombrement. Enregistrer quand même ?`)) return;
+  }
   await idbAddPending({
     kind: "menage", cle: state.currentMenageCle, id_menage: menageTarget.id_menage, _row: menageTarget._row,
     statut: statutFinal,
@@ -1111,6 +1182,10 @@ els["menage-save"].addEventListener("click", async () => {
     logement: els["menage-logement"].value.trim(),
     alimentation: els["menage-alimentation"].value.trim(),
     choc: els["menage-choc"].value.trim(),
+    taille_menage: taille,
+    surnom_cm: els["menage-surnom"].value.trim(),
+    nouveau_tel: els["menage-nouveau-tel"].value.trim(),
+    code_enquete: els["menage-code-enquete"].value.trim(),
     fichiers: menageNewFiles.length ? menageNewFiles.map(f => ({ nom: f.nom, type: f.type, base64: f.base64 })) : undefined,
     timestamp: new Date().toISOString()
   });

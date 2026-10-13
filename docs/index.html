@@ -221,6 +221,7 @@
         </select>
         <button class="secondary" id="menages-export" style="flex-shrink:0;">Exporter (.xlsx)</button>
       </div>
+      <button class="secondary" id="menages-fiche-export" style="width:100%; margin-bottom:8px;" title="Livrable de sortie de localité : fiche de dénombrement de vos ménages (réalisés / non réalisés)">📋 Fiche de dénombrement (.xlsx)</button>
       <div id="menages-list" style="overflow-y:auto; flex:1;"></div>
       <div class="modal-actions" style="margin-top:12px;">
         <button class="secondary" id="menages-close">Fermer</button>
@@ -250,6 +251,29 @@
     <div class="modal" style="max-height:85vh; overflow-y:auto;">
       <h2 id="menage-detail-title">Ménage</h2>
       <p class="empty-hint" id="menage-detail-tel" style="margin-bottom:12px;">—</p>
+
+      <div class="field-label" style="margin-top:0;">Fiche de dénombrement</div>
+      <p class="empty-hint" id="menage-code-denombrement" style="margin:0 0 6px;">—</p>
+      <div class="row" style="align-items:flex-start;">
+        <div style="flex:1; min-width:130px;">
+          <div class="field-label">Taille du ménage</div>
+          <input type="number" inputmode="numeric" min="1" max="99" step="1" id="menage-taille" style="width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper);" placeholder="Ex. 5">
+        </div>
+        <div style="flex:2; min-width:160px;">
+          <div class="field-label">Surnom du chef de ménage</div>
+          <input type="text" id="menage-surnom" maxlength="60" style="width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper);" placeholder="Facultatif">
+        </div>
+      </div>
+      <div class="row" style="align-items:flex-start;">
+        <div style="flex:1; min-width:160px;">
+          <div class="field-label">Nouveau n° de téléphone du ménage</div>
+          <input type="tel" inputmode="tel" id="menage-nouveau-tel" maxlength="24" style="width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper);" placeholder="Ex. 07 09 10 11 12">
+        </div>
+        <div style="flex:1; min-width:130px;">
+          <div class="field-label">Code de l'Enquête</div>
+          <input type="text" id="menage-code-enquete" maxlength="40" style="width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper);" placeholder="Saisie manuelle">
+        </div>
+      </div>
 
       <div class="field-label">Statut de traitement</div>
       <select id="menage-statut" style="width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); font-size:0.9rem;">
