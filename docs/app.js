@@ -242,6 +242,16 @@ async function parseJsonResponse(res) {
   }
 }
 
+// Une réponse « action inconnue » signifie que le déploiement Apps Script publié est plus ancien
+// que ce PWA (le code a été collé mais pas republié). On donne la marche à suivre à l'écran.
+function expliquerErreurServeur(message) {
+  const m = String(message || "");
+  if (/action inconnue/i.test(m) && !/Nouvelle version/i.test(m)) {
+    return m + " — Le script Apps Script publié n'est pas à jour : dans l'éditeur Apps Script, Déployer > Gérer les déploiements > Modifier (crayon) > Version : « Nouvelle version » > Déployer.";
+  }
+  return m;
+}
+
 async function fetchLive() {
   const url = `${CFG.APPS_SCRIPT_URL}?action=list&id_token=${encodeURIComponent(auth.idToken || "")}&t=${Date.now()}`;
   const res = await fetch(url, { method: "GET" });
@@ -1149,7 +1159,7 @@ els["menages-fiche-export"].addEventListener("click", async () => {
     downloadXlsxToDevice(data);
     if (data.incompletes) alert(`Fiche générée (${data.nb_lignes} ménage(s)). Attention : ${data.incompletes} ménage(s) réalisé(s) n'ont pas de taille de ménage ou de code d'enquête. Complétez-les dans leur fiche puis régénérez.`);
   } catch (e) {
-    alert("Fiche impossible : " + e.message);
+    alert("Fiche impossible : " + expliquerErreurServeur(e.message));
   } finally {
     btn.disabled = false; btn.textContent = label;
   }
@@ -1303,6 +1313,7 @@ async function fetchExportColumns() {
   const res = await fetch(url);
   const data = await parseJsonResponse(res);
   if (data.auth_required) throw Object.assign(new Error(data.error), { authRequired: true });
+  if (data.error) throw new Error(data.error);
   exportColumnsCache = data.columns || [];
   return exportColumnsCache;
 }
@@ -1356,7 +1367,7 @@ async function openExportColumnsModal() {
     renderExportColumnsList(columns);
   } catch (e) {
     if (e.authRequired) { els["export-columns-modal"].classList.add("hidden"); flagAuthProblem(e.message); }
-    else els["export-columns-list"].innerHTML = `<div class="empty-hint">Erreur : ${e.message}</div>`;
+    else els["export-columns-list"].innerHTML = `<div class="empty-hint">Erreur : ${escapeHtml(expliquerErreurServeur(e.message))}</div>`;
   }
 }
 els["btn-export-menages"].addEventListener("click", () => {
@@ -1397,7 +1408,7 @@ els["export-columns-confirm"].addEventListener("click", async () => {
     els["export-columns-modal"].classList.add("hidden");
   } catch (e) {
     if (e.authRequired) { els["export-columns-modal"].classList.add("hidden"); flagAuthProblem(e.message); }
-    else alert("Export impossible : " + e.message);
+    else alert("Export impossible : " + expliquerErreurServeur(e.message));
   } finally {
     btn.disabled = false;
     btn.textContent = label;
