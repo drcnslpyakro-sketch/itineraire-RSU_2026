@@ -192,7 +192,7 @@ function nearestOther(lat, lng, cle) {
   return best;
 }
 const MENAGES_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 heures
-const MENAGES_CACHE_STORAGE_KEY = "menagesCacheV1";
+const MENAGES_CACHE_STORAGE_KEY = "menagesCacheV2"; // V2 : vide les anciennes listes (Koimoi-Dibikro avait 665 ménages, filtrés à 30 depuis v8.4)
 const state = {
   localites: [], markersByCle: {}, pending: [], itinerary: [],
   showUnverified: true, map: null, routeLine: null,
@@ -719,6 +719,7 @@ els["hidden-localites-close"].addEventListener("click", () => els["hidden-locali
    à se rafraîchir en ligne.
 */
 function loadMenagesCacheFromStorage() {
+  try { localStorage.removeItem("menagesCacheV1"); } catch (e) { /* ancien cache : libère la place, sans importance si impossible */ }
   try {
     const raw = localStorage.getItem(MENAGES_CACHE_STORAGE_KEY);
     if (!raw) return;
