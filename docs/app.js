@@ -738,6 +738,9 @@ function saveMenagesCacheToStorage() {
   try {
     const out = {};
     Object.keys(state.menagesCache).forEach(cle => {
+      // Les très grosses listes restent en mémoire seulement : une seule ferait dépasser le quota et
+      // empêcherait de conserver toutes les autres.
+      if ((state.menagesCache[cle] || []).length > 3000) return;
       out[cle] = { menages: state.menagesCache[cle], ts: state.menagesCacheTs[cle] || Date.now() };
     });
     localStorage.setItem(MENAGES_CACHE_STORAGE_KEY, JSON.stringify(out));
@@ -867,6 +870,7 @@ function currentFilteredMenages() {
     if (!mien) return false;
     const matchQ = !q ||
       (m.nom_chef_menage||"").toLowerCase().includes(q) ||
+      (m.village_quartier||"").toLowerCase().includes(q) ||
       String(m.tel_chef_menage||"").includes(q) ||
       String(m.id_menage||"").toLowerCase().includes(q);
     // "Sans numéro" est un critère à part, orthogonal au statut de traitement
@@ -881,7 +885,11 @@ function currentFilteredMenages() {
 function renderMenagesList() {
   const filtered = currentFilteredMenages();
   if (filtered.length === 0) { els["menages-list"].innerHTML = '<div class="empty-hint">Aucun ménage trouvé.</div>'; return; }
-  els["menages-list"].innerHTML = filtered.map(m => {
+  // Localités très volumineuses (ex. Yamoussoukro : plus de 15 000 ménages) : on n'affiche que les premiers
+  // pour garder l'écran fluide ; la recherche (nom, numéro, village/quartier, identifiant) affine la liste.
+  const MAX_AFFICHES = 300;
+  const affiches = filtered.slice(0, MAX_AFFICHES);
+  els["menages-list"].innerHTML = affiches.map(m => {
     const sansNumero = !telEstRenseigne(m.tel_chef_menage);
     return `
     <div class="list-row" data-id="${escapeHtml(m.id_menage)}" style="cursor:pointer;">
@@ -890,7 +898,8 @@ function renderMenagesList() {
       <div class="sub" style="opacity:0.7;">${escapeHtml(m.id_menage || "")}</div></div>
       <span class="badge ${statutBadgeClass(m.statut)}">${escapeHtml(m.statut || "Non traité")}</span>
     </div>`;
-  }).join("");
+  }).join("") + (filtered.length > MAX_AFFICHES
+    ? `<div class="empty-hint">${filtered.length - MAX_AFFICHES} autres ménages : affinez la recherche (nom, numéro, village/quartier).</div>` : "");
   els["menages-list"].querySelectorAll("[data-id]").forEach(row => row.addEventListener("click", () => openMenageDetail(row.dataset.id)));
 }
 els["menages-search"].addEventListener("input", () => renderMenagesList());
